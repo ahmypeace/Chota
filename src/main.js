@@ -1,0 +1,1071 @@
+"use strict";
+/* ---------- helpers ---------- */
+const $ = (s) => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function toast(msg, ms = 2200) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms); }
+function ask(html, okLabel = 'OK') {
+  return new Promise((res) => {
+    $('#mBody').innerHTML = html; $('#mOk').textContent = okLabel; $('#modal').classList.add('on');
+    const done = (v) => { $('#modal').classList.remove('on'); $('#mOk').onclick = $('#mCancel').onclick = null; res(v); };
+    $('#mOk').onclick = () => done(true); $('#mCancel').onclick = () => done(false);
+  });
+}
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+const natCmp = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
+const safeSeg = (s) => { let x = s.replace(/[^A-Za-z0-9_\-.~:@+]/g, '_').slice(0, 150); if (x === '.' || x === '..' || !x) x = '_' + x; return x; };
+const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const dayOf = (ts) => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+/* ---------- defaults ---------- */
+const OLD_STARTER = ['market', 'governance', 'capability', 'dominant', 'notes'];
+const yesno = (name, label, help) => ({ name, label, type: 'binary', help });
+const DEFAULT_CODEBOOK = { vars: [
+  yesno('ai_central', 'Is AI the main subject of the article?', 'Yes if AI is the focus of the headline, the lead, or most of the text. No if AI only comes up in passing.'),
+  yesno('market', 'Is AI presented as a market?', 'AI as something bought, sold, invested in or profited from: products, startups, deals, investment, revenue, jobs created, consumer use.'),
+  yesno('governance', 'Is AI presented as something to govern?', 'AI as something to regulate, legislate, set policy or strategy for, or oversee for risks: laws, bills, national AI strategies, ethics guidelines, data protection, regulators.'),
+  yesno('capability', 'Is AI presented as a capability to build?', 'AI as national or local capacity to develop: skills and training, research, universities, data centres, compute, infrastructure, homegrown innovation.'),
+  { name: 'dominant', label: 'Which orientation gets the most space?', type: 'single', options: [{ code: 1, label: 'Market' }, { code: 2, label: 'Governance' }, { code: 3, label: 'Capability' }, { code: 4, label: 'None of these' }], help: 'Count paragraphs if two seem equal; the one in the headline or lead wins a tie.' },
+  yesno('act_gov', 'Is a government actor quoted or cited?', 'Ministers, presidents, legislators, regulators, government agencies.'),
+  yesno('act_tech', 'Is a technology company or its staff quoted or cited?', 'Firms of any size, their executives, spokespeople or press releases.'),
+  yesno('act_expert', 'Is an academic or expert quoted or cited?', 'University researchers, think tanks, consultants, independent analysts.'),
+  yesno('act_civil', 'Is civil society or an ordinary citizen quoted or cited?', 'NGOs, unions, advocacy groups, professional associations, users, workers, students.'),
+  yesno('act_intl', 'Is an international organization quoted or cited?', 'UN agencies, World Bank, IMF, AU, ASEAN, ECOWAS, OECD.'),
+  { name: 'main_actor', label: 'Who is the main actor?', type: 'single', options: [{ code: 1, label: 'Government' }, { code: 2, label: 'Tech company' }, { code: 3, label: 'Academic or expert' }, { code: 4, label: 'Civil society or citizen' }, { code: 5, label: 'International organization' }, { code: 6, label: 'Other or none' }], help: 'The actor quoted first or given the most space.' },
+  yesno('benefit', 'Are benefits of AI mentioned?', 'Growth, efficiency, better services, health, education, jobs created.'),
+  yesno('risk', 'Are risks or harms of AI mentioned?', 'Job losses, bias, misinformation, deepfakes, privacy, surveillance, safety.'),
+  { name: 'tone', label: 'Overall tone toward AI', type: 'single', options: [{ code: 1, label: 'Positive' }, { code: 2, label: 'Negative' }, { code: 3, label: 'Mixed or neutral' }], help: 'Judge the article as a whole, not single quotes.' },
+  { name: 'genre', label: 'Type of article', type: 'single', options: [{ code: 1, label: 'Hard news' }, { code: 2, label: 'Feature or analysis' }, { code: 3, label: 'Opinion or editorial' }, { code: 4, label: 'Interview' }, { code: 5, label: 'Press release or sponsored' }], help: '' },
+  { name: 'notes', label: 'Notes', type: 'text', help: 'Anything odd about this article, or a quote worth keeping.' },
+] };
+const DEFAULT_SETTINGS = {
+  target: 940, deadline: '2026-11-25', hl: 'AI, artificial intelligence, ChatGPT, generative, algorithm, machine learning, regulation, policy',
+  outlets: ['Daily Guide = Ghana', 'The Herald = Ghana', 'Punch = Nigeria', 'The Nation = Nigeria', 'The Standard = Kenya', 'The Star = Kenya', 'Daily Monitor = Uganda', 'The Observer = Uganda', 'Hindustan Times = India', 'Times of India = India', 'Dawn = Pakistan', 'The News International = Pakistan', 'New Straits Times = Malaysia', 'Malay Mail = Malaysia', 'Philippine Daily Inquirer = Philippines', 'Philippine Star = Philippines'].join('\n'),
+};
+
+/* ---------- state ---------- */
+const S = {
+  codebook: (() => { const c = lsGet('cc_codebook', null); return c && JSON.stringify(c.vars.map((v) => v.name)) !== JSON.stringify(OLD_STARTER) ? c : JSON.parse(JSON.stringify(DEFAULT_CODEBOOK)); })(),
+  settings: Object.assign({}, DEFAULT_SETTINGS, lsGet('cc_settings', {})),
+  records: lsGet('cc_records', {}),
+  recodes: lsGet('cc_recodes', {}),
+  sample: lsGet('cc_sample', null),
+  files: [], articles: [], cur: -1,
+  mode: 'code', form: {}, meta: {}, activeQ: 0, confirmMissing: false, openedAt: 0,
+  zoom: 1, textMode: false, view: 'code', qFilter: 'todo', showOutlets: false,
+  folders: lsGet('cc_folders', []), folderSel: '', openFolders: new Set(), selecting: false, selected: new Set(), assets: null, libFull: false,
+  db: null, uid: null, dl: null, cloud: false,
+};
+
+/* ---------- outlets ---------- */
+function outletList() {
+  return S.settings.outlets.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const [o, c] = l.split('='); return { outlet: (o || '').trim(), country: (c || '').trim() }; }).filter((x) => x.outlet);
+}
+function countryList() { const out = []; for (const o of outletList()) if (o.country && !out.includes(o.country)) out.push(o.country); return out; }
+
+/* ---------- storage (cloud + local) ---------- */
+let writeChain = Promise.resolve();
+function cloudWrite(fn) {
+  writeChain = writeChain.then(async () => {
+    if (!S.cloud) return;
+    for (let i = 0; i < 2; i++) {
+      try { await fn(); return; } catch (e) {
+        if (e && e.code === 'unavailable' && i === 0) { await sleep(400 + Math.random() * 600); continue; }
+        console.warn('cloud write failed', e); setStore(false, 'Cloud save failed. Kept in this browser; download a backup.'); return;
+      }
+    }
+  });
+  return writeChain;
+}
+const ud = (p) => S.db.doc(`data/users/${S.uid}/${p}`);
+const codesCol = () => ud('project').collection('codes');
+const recodesCol = () => ud('project').collection('recodes');
+function persistRecord(r) { lsSet('cc_records', S.records); cloudWrite(() => codesCol().doc(safeSeg(r.key)).set(r)); }
+function deleteRecord(key) { delete S.records[key]; lsSet('cc_records', S.records); cloudWrite(() => codesCol().doc(safeSeg(key)).delete()); }
+function persistRecode(r) { lsSet('cc_recodes', S.recodes); cloudWrite(() => recodesCol().doc(safeSeg(r.key)).set(r)); }
+function persistCodebook() { lsSet('cc_codebook', S.codebook); cloudWrite(() => ud('codebook').set(JSON.parse(JSON.stringify(S.codebook)))); }
+function persistSettings() { lsSet('cc_settings', S.settings); cloudWrite(() => ud('settings').set({ ...S.settings })); }
+function persistSample() { lsSet('cc_sample', S.sample); cloudWrite(() => S.sample ? ud('recodesample').set(S.sample) : ud('recodesample').delete()); }
+
+function setStore(cloud, title) {
+  $('#saveDot').classList.toggle('cloud', !!cloud);
+  $('#store').textContent = cloud ? 'Saved' : 'This browser only';
+  $('#saveDot').title = title || (cloud ? 'Every article you save is stored with your account.' : 'Codes are kept in this browser only. Download a backup from Export at the end of each day.');
+}
+async function loadAll(col, kf = 'key') {
+  const out = {};
+  const a = await col.orderBy('savedAt', 'asc').limit(1000).get();
+  for (const d of a.docs) { const x = d.data(); if (x && x[kf]) out[x[kf]] = x; }
+  if (a.size >= 1000) { const b = await col.orderBy('savedAt', 'desc').limit(1000).get(); for (const d of b.docs) { const x = d.data(); if (x && x[kf]) out[x[kf]] = x; } }
+  return out;
+}
+async function initCloud() {
+  setStore(false, 'Connecting to your account'); $('#store').textContent = 'Connecting';
+  try {
+    const [db, user] = await Promise.all([null, null]);
+    S.dl = await null;
+    S.assets = await null;
+    if (!db || !user) { setStore(false); return; }
+    const uid = await user.id();
+    if (!uid) { setStore(false); return; }
+    S.db = db; S.uid = uid;
+    const timeout = sleep(12000).then(() => { throw new Error('timeout'); });
+    const load = (async () => {
+      const [cb, st, sm, recs, rcs, lib, fo] = await Promise.all([ud('codebook').get(), ud('settings').get(), ud('recodesample').get(), loadAll(codesCol()), loadAll(recodesCol()), loadAll(libCol(), 'id'), ud('folders').get()]);
+      return { cb, st, sm, recs, rcs, lib, fo };
+    })();
+    const { cb, st, sm, recs, rcs, lib, fo } = await Promise.race([load, timeout]);
+    S.cloud = true;
+    // merge: newer savedAt wins; push local-only items up
+    const pushRec = [], pushRc = [];
+    for (const [k, r] of Object.entries(recs)) if (!S.records[k] || (S.records[k].savedAt || 0) < (r.savedAt || 0)) S.records[k] = r;
+    for (const [k, r] of Object.entries(S.records)) if (!recs[k] || (recs[k].savedAt || 0) < (r.savedAt || 0)) pushRec.push(r);
+    for (const [k, r] of Object.entries(rcs)) if (!S.recodes[k] || (S.recodes[k].savedAt || 0) < (r.savedAt || 0)) S.recodes[k] = r;
+    for (const [k, r] of Object.entries(S.recodes)) if (!rcs[k] || (rcs[k].savedAt || 0) < (r.savedAt || 0)) pushRc.push(r);
+    if (cb.exists && Array.isArray(cb.data().vars)) S.codebook = JSON.parse(JSON.stringify(cb.data())); else persistCodebook();
+    if (JSON.stringify(S.codebook.vars.map((v) => v.name)) === JSON.stringify(OLD_STARTER)) { S.codebook = JSON.parse(JSON.stringify(DEFAULT_CODEBOOK)); persistCodebook(); }
+    if (fo.exists && Array.isArray(fo.data().list)) { S.folders = [...new Set([...fo.data().list, ...S.folders])]; lsSet('cc_folders', S.folders); }
+    for (const d of Object.values(lib)) {
+      if (S.files.some((f) => f.id === d.id)) { const f = S.files.find((x) => x.id === d.id); if (!f.assetId) { f.assetId = d.assetId; f.folder = f.folder || d.folder; } continue; }
+      S.files.push({ id: d.id, name: d.name, size: d.size, assetId: d.assetId, folder: d.folder || '', addedAt: d.addedAt, numPages: d.numPages, starts: (d.starts && d.starts.length ? d.starts.slice() : [1]), metaByStart: JSON.parse(JSON.stringify(d.metaByStart || {})), scanned: !!d.numPages, pages: null });
+    }
+    sortFiles();
+    if (st.exists) S.settings = Object.assign({}, DEFAULT_SETTINGS, st.data()); else persistSettings();
+    if (sm.exists) S.sample = JSON.parse(JSON.stringify(sm.data())); else if (S.sample) persistSample();
+    lsSet('cc_records', S.records); lsSet('cc_recodes', S.recodes); lsSet('cc_codebook', S.codebook); lsSet('cc_settings', S.settings);
+    for (const r of pushRec) cloudWrite(() => codesCol().doc(safeSeg(r.key)).set(r));
+    for (const r of pushRc) cloudWrite(() => recodesCol().doc(safeSeg(r.key)).set(r));
+    setStore(true);
+    refreshAll(); renderFolders(); libState(); uploadQueue();
+    if (S.cur < 0 && S.files.length) goNext(-1);
+  } catch (e) {
+    console.warn('cloud init', e); S.cloud = false; setStore(false);
+  }
+}
+
+/* ---------- PDF handling ---------- */
+const MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December';
+const DATE_RE = new RegExp(`\\b(${MONTHS})\\s+(\\d{1,2}),?\\s+(\\d{4})`, 'i');
+const DATE_RE2 = new RegExp(`\\b(\\d{1,2})\\s+(${MONTHS})\\s+(\\d{4})`, 'i');
+function linesFrom(tc) {
+  const lines = []; let cur = '', lastY = null;
+  for (const it of tc.items) {
+    if (typeof it.str !== 'string') continue;
+    const y = it.transform ? Math.round(it.transform[5]) : null;
+    if (lastY !== null && y !== null && Math.abs(y - lastY) > 2 && cur.trim()) { lines.push(cur.trim()); cur = ''; }
+    cur += it.str; if (it.hasEOL) { if (cur.trim()) lines.push(cur.trim()); cur = ''; }
+    else if (it.str && !/\s$/.test(it.str)) cur += '';
+    lastY = y;
+  }
+  if (cur.trim()) lines.push(cur.trim());
+  return lines.map((l) => l.replace(/\s+/g, ' '));
+}
+function detectStarts(pages) {
+  const n = pages.length;
+  const p1 = []; pages.forEach((ls, i) => { if (ls.some((l) => /\bPage\s+1\s+of\s+\d+\b/i.test(l))) p1.push(i + 1); });
+  if (p1.length) return p1;
+  const ends = []; pages.forEach((ls, i) => { if (ls.some((l) => /End of Document/i.test(l))) ends.push(i + 1); });
+  if (ends.length >= 2) { const s = [1]; for (const e of ends) if (e + 1 <= n) s.push(e + 1); return [...new Set(s)]; }
+  return [1];
+}
+function guessMeta(lines, fileName) {
+  const head = lines.slice(0, 18);
+  const meta = { outlet: '', country: '', year: '', date: '', headline: '', words: '' };
+  const outs = outletList().slice().sort((a, b) => b.outlet.length - a.outlet.length);
+  const hay = head.join('\n').toLowerCase();
+  for (const o of outs) { if (hay.includes(o.outlet.toLowerCase())) { meta.outlet = o.outlet; meta.country = o.country; break; } }
+  if (!meta.outlet) { const fn = fileName.toLowerCase().replace(/[_\-]+/g, ' '); for (const o of outs) if (fn.includes(o.outlet.toLowerCase())) { meta.outlet = o.outlet; meta.country = o.country; break; } }
+  const all = lines.slice(0, 40).join('\n');
+  let m = all.match(DATE_RE);
+  if (m) { meta.date = `${m[1]} ${m[2]}, ${m[3]}`; meta.year = m[3]; }
+  else if ((m = all.match(DATE_RE2))) { meta.date = `${m[1]} ${m[2]} ${m[3]}`; meta.year = m[3]; }
+  else { const y = fileName.match(/(20[0-3]\d)/); if (y) meta.year = y[1]; }
+  const w = all.match(/Length:\s*([\d,]+)\s*words/i); if (w) meta.words = w[1].replace(/,/g, '');
+  const skip = (l) => !l || l.length < 4 || /^Page \d+ of \d+/i.test(l) || /^(Copyright|Section|Length|Byline|Body|Load-Date|Language|Publication|Highlight)\b/i.test(l) || DATE_RE.test(l) || (meta.outlet && l.toLowerCase() === meta.outlet.toLowerCase());
+  const hl = head.find((l) => !skip(l));
+  meta.headline = hl ? hl.slice(0, 250) : '';
+  return meta;
+}
+function keyFor(f, start) { return f.id + '~p' + start; }
+const libCol = () => ud('project').collection('files');
+function fileDoc(f) { return { id: f.id, name: f.name, size: f.size || 0, assetId: f.assetId || '', folder: f.folder || '', numPages: f.numPages || null, starts: f.starts, metaByStart: f.metaByStart || {}, addedAt: f.addedAt || Date.now(), savedAt: Date.now() }; }
+function persistFile(f) { if (f.assetId) cloudWrite(() => libCol().doc(f.id).set(fileDoc(f))); }
+function persistFolders() { lsSet('cc_folders', S.folders); cloudWrite(() => ud('folders').set({ list: S.folders })); }
+async function fileBytes(f) {
+  if (f.file) return f.file.arrayBuffer();
+  if (f.assetId) { const r = await fetch('/_blob/' + f.assetId); if (!r.ok) throw new Error('The saved PDF could not be loaded (' + r.status + '). Add it again.'); return r.arrayBuffer(); }
+  throw new Error('This PDF is not in your library. Add it again.');
+}
+function sortFiles() { S.files.sort((a, b) => natCmp(a.folder || '', b.folder || '') || natCmp(a.name, b.name)); }
+const fileIndex = (f) => S.files.indexOf(f);
+
+async function addFiles(list) {
+  const pdfs = [...list].filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  if (!pdfs.length) { toast('No PDF files found there.'); return; }
+  const folder = S.folderSel && S.folderSel !== '__unfiled' ? S.folderSel : '';
+  const byId = new Map(S.files.map((f) => [f.id, f]));
+  let added = 0, skipped = 0;
+  for (const file of pdfs) {
+    let id = safeSeg(file.name);
+    const ex = byId.get(id);
+    if (ex) {
+      if (!ex.size || ex.size === file.size) { if (!ex.file) ex.file = file; if (!ex.size) ex.size = file.size; skipped++; continue; }
+      id = safeSeg(file.name.replace(/\.pdf$/i, '')) + '-' + file.size + '.pdf';
+      if (byId.has(id)) { skipped++; continue; }
+    }
+    const f = { id, file, name: file.name, size: file.size, folder, addedAt: Date.now(), scanned: false, numPages: null, starts: [1], pages: null, metaByStart: {} };
+    S.files.push(f); byId.set(id, f); added++;
+  }
+  sortFiles(); rebuildArticles(); renderFolders();
+  toast(`${added} PDF${added === 1 ? '' : 's'} added${folder ? ' to ' + folder : ''}${skipped ? `, ${skipped} already in your library` : ''}`, 3000);
+  if (S.cur < 0) await goNext(-1);
+  backgroundScan(); uploadQueue();
+}
+function rebuildArticles() {
+  const curKey = S.articles[S.cur]?.key;
+  const arts = [];
+  S.files.forEach((f, fi) => {
+    const starts = f.starts.slice().sort((a, b) => a - b);
+    starts.forEach((s, i) => {
+      const end = i + 1 < starts.length ? starts[i + 1] - 1 : (f.numPages || s);
+      arts.push({ key: keyFor(f, s), fi, start: s, end, scanned: f.scanned });
+    });
+  });
+  S.articles = arts;
+  S.cur = curKey ? arts.findIndex((a) => a.key === curKey) : S.cur;
+  if (S.cur >= arts.length) S.cur = -1;
+  renderQueue(); renderProgress();
+}
+async function extractPages(doc) {
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const pg = await doc.getPage(p); const tc = await pg.getTextContent(); pages.push(linesFrom(tc)); pg.cleanup();
+    if (p % 3 === 0) await sleep(0);
+  }
+  return pages;
+}
+async function scanFile(fi) {
+  const f = S.files[fi];
+  if (f.scanned) return; if (f.scanP) return f.scanP;
+  f.scanP = (async () => {
+    try {
+      const doc = await pdfjsLib.getDocument({ data: await fileBytes(f) }).promise;
+      const pages = await extractPages(doc); const n = doc.numPages;
+      doc.destroy();
+      f.numPages = n; f.pages = pages;
+      let starts = detectStarts(pages);
+      const prefix = f.id + '~p';
+      for (const k of Object.keys(S.records)) if (k.startsWith(prefix)) { const s = +k.slice(prefix.length); if (s >= 1 && s <= n) starts.push(s); }
+      if (S.fileSplits?.[f.name]) starts.push(...S.fileSplits[f.name]);
+      starts = [...new Set(starts)].sort((a, b) => a - b);
+      f.starts = starts;
+      for (const s of starts) { const ls = pages.slice(s - 1, s + 1).flat(); f.metaByStart[s] = guessMeta(ls, f.name); }
+      persistFile(f);
+    } catch (e) {
+      console.warn('scan failed', f.name, e); f.numPages = f.numPages || 1; f.error = String(e.message || e);
+    }
+    f.scanned = true; rebuildArticles(); renderFolders();
+  })();
+  return f.scanP;
+}
+let scanning = false;
+async function backgroundScan() {
+  if (scanning) return; scanning = true;
+  while (true) {
+    const fi = S.files.findIndex((f) => !f.scanned && !f.scanP);
+    const left = S.files.filter((f) => !f.scanned).length;
+    $('#scanState').textContent = left ? `Reading PDFs… ${S.files.length - left} of ${S.files.length}` : '';
+    if (fi < 0) break;
+    await scanFile(fi); await sleep(5);
+  }
+  scanning = false; libState();
+}
+let uploading = false;
+async function uploadQueue() {
+  if (uploading || !S.assets || !S.cloud) { libState(); return; }
+  uploading = true;
+  while (true) {
+    const todo = S.files.filter((x) => x.file && !x.assetId && !x.uploadFailed);
+    libState(todo.length);
+    const f = todo[0]; if (!f) break;
+    try {
+      if (!f.scanned) await scanFile(fileIndex(f));
+      if (f.size > 20 * 1024 * 1024) throw { code: 'too_large' };
+      let res;
+      try { res = await S.assets.upload(f.file, { type: 'application/pdf' }); }
+      catch (e) {
+        if (e?.code !== 'store_unavailable' && e?.code !== 'rate_limited') throw e;
+        await sleep(e.code === 'rate_limited' ? 6000 : 1500);
+        res = await S.assets.upload(f.file, { type: 'application/pdf' });
+      }
+      f.assetId = res.id; persistFile(f);
+    } catch (e) {
+      f.uploadFailed = e?.code || 'error'; console.warn('upload failed', f.name, e);
+      if (e?.code === 'quota_or_state') { S.libFull = true; toast('Library storage is full. The other PDFs stay open for this visit only.', 6000); break; }
+      if (e?.code === 'too_large') toast(f.name + ' is over 20 MB, so it stays for this visit only.', 4000);
+    }
+  }
+  uploading = false; libState(); renderQueue();
+}
+function libState(pending) {
+  const n = S.files.length, saved = S.files.filter((f) => f.assetId).length;
+  let t = '';
+  if (pending) t = `Saving PDFs to your library, ${pending} to go`;
+  else if (!n) t = '';
+  else if (!S.assets || !S.cloud) t = `${n} PDFs open for this visit only. Add them again next time.`;
+  else if (saved < n) t = `${saved} of ${n} PDFs saved${S.libFull ? '. Library storage is full' : ''}.`;
+  else t = `${n} PDFs saved, ${S.articles.length} articles`;
+  $('#libState').textContent = t;
+}
+
+/* ---------- folders ---------- */
+function allFolders() {
+  const set = new Set(S.folders || []);
+  for (const f of S.files) if (f.folder) set.add(f.folder);
+  for (const p of [...set]) { const parts = p.split('/'); for (let i = 1; i < parts.length; i++) set.add(parts.slice(0, i).join('/')); }
+  return [...set].sort(natCmp);
+}
+const inFolder = (f, sel) => !sel ? true : sel === '__unfiled' ? !f.folder : (f.folder === sel || (f.folder || '').startsWith(sel + '/'));
+function renderFolders() {
+  const box = $('#folders'); if (!box) return;
+  box.innerHTML = '';
+  const folders = allFolders();
+  const count = (sel) => { let tot = 0, done = 0; for (const a of S.articles) { if (!inFolder(S.files[a.fi], sel)) continue; tot++; if (S.records[a.key]) done++; } return `${done}/${tot}`; };
+  const row = (label, sel, depth, hasKids) => {
+    const on = (S.folderSel || '') === sel;
+    const open = S.openFolders.has(sel);
+    return el('div', { class: 'frow' + (on ? ' on' : ''), style: `padding-left:${8 + depth * 14}px`, onclick: () => {
+      if (hasKids) { if (open && on) S.openFolders.delete(sel); else S.openFolders.add(sel); }
+      S.folderSel = sel; renderFolders(); renderQueue();
+    } }, el('span', { class: 'tw' }, hasKids ? (open ? '▾' : '▸') : ''), el('span', { class: 'fn' }, label), el('span', { class: 'fc' }, count(sel)));
+  };
+  box.append(row('All articles', '', 0, false));
+  for (const p of folders) {
+    const parts = p.split('/'); const parent = parts.slice(0, -1).join('/');
+    if (parent && !(S.openFolders.has(parent) && parentsOpen(parent))) continue;
+    const hasKids = folders.some((q) => q.startsWith(p + '/'));
+    box.append(row(parts[parts.length - 1], p, parts.length - 1 + 0, hasKids));
+  }
+  if (folders.length && S.files.some((f) => !f.folder)) box.append(row('No folder', '__unfiled', 0, false));
+  const sel = S.folderSel;
+  $('#btnDelFolder').style.display = sel && sel !== '__unfiled' ? '' : 'none';
+  $('#selBar').style.display = S.selecting ? 'flex' : 'none';
+  $('#btnSelect').classList.toggle('on', S.selecting);
+  $('#selCount').textContent = `${S.selected.size} selected`;
+}
+function parentsOpen(p) { const parts = p.split('/'); for (let i = 1; i <= parts.length; i++) if (!S.openFolders.has(parts.slice(0, i).join('/'))) return false; return true; }
+function chooseFolder(title) {
+  return new Promise((res) => {
+    const folders = allFolders();
+    $('#mBody').innerHTML = `<h3>${esc(title)}</h3><div class="chips" id="fchips" style="max-height:240px;overflow:auto">${['', ...folders].map((p, i) => `<button data-i="${i}">${p ? esc(p) : 'No folder'}</button>`).join('')}</div><p class="small mute" style="margin:12px 0 4px">Or a new folder (use / for subfolders, e.g. Nigeria/Punch)</p><input id="newFolder" style="width:100%" placeholder="New folder name">`;
+    $('#mOk').textContent = 'Use new folder'; $('#modal').classList.add('on');
+    const done = (v) => { $('#modal').classList.remove('on'); $('#mOk').onclick = $('#mCancel').onclick = null; res(v); };
+    document.querySelectorAll('#fchips button').forEach((b) => b.onclick = () => done(['', ...folders][+b.dataset.i]));
+    $('#mOk').onclick = () => { const v = $('#newFolder').value.split('/').map((x) => x.trim()).filter(Boolean).join('/'); if (!v) { toast('Type a folder name'); return; } done(v); };
+    $('#mCancel').onclick = () => done(null);
+    setTimeout(() => $('#newFolder').focus(), 30);
+  });
+}
+function moveFiles(files, folder) {
+  for (const f of files) { if (f.folder === folder) continue; f.folder = folder; persistFile(f); }
+  if (folder && !S.folders.includes(folder)) { S.folders.push(folder); persistFolders(); }
+  sortFiles(); rebuildArticles(); renderFolders();
+}
+async function newFolder() {
+  const ok = await ask('<h3>New folder</h3><p class="small mute">Use / for subfolders, e.g. Nigeria/Punch. New PDFs go into the folder you have open.</p><input id="nf" style="width:100%" placeholder="Folder name">', 'Create');
+  if (!ok) return;
+  const v = (document.getElementById('nf').value || '').split('/').map((x) => x.trim()).filter(Boolean).join('/');
+  if (!v) return;
+  if (!S.folders.includes(v)) { S.folders.push(v); persistFolders(); }
+  S.folderSel = v; const parts = v.split('/'); for (let i = 1; i <= parts.length; i++) S.openFolders.add(parts.slice(0, i).join('/'));
+  renderFolders(); renderQueue();
+}
+async function deleteFolder() {
+  const sel = S.folderSel; if (!sel || sel === '__unfiled') return;
+  const parent = sel.split('/').slice(0, -1).join('/');
+  if (!(await ask(`<h3>Delete folder ${esc(sel)}?</h3><p class="small">The PDFs inside are kept and move to ${parent ? esc(parent) : 'No folder'}. Codes are not affected.</p>`, 'Delete folder'))) return;
+  const files = S.files.filter((f) => inFolder(f, sel));
+  for (const f of files) { f.folder = parent; persistFile(f); }
+  S.folders = S.folders.filter((p) => p !== sel && !p.startsWith(sel + '/')); persistFolders();
+  S.folderSel = parent; sortFiles(); rebuildArticles(); renderFolders();
+}
+async function autoSort() {
+  const choice = await new Promise((res) => {
+    $('#mBody').innerHTML = `<h3>Sort PDFs into folders</h3><p class="small mute">Uses the outlet, country and year found on each article's first page. PDFs with nothing detected go to Unsorted.</p><div class="btnrow" id="asb"><button data-k="c">Country</button><button data-k="co">Country / Outlet</button><button data-k="coy">Country / Outlet / Year</button><button data-k="cy">Country / Year</button></div>`;
+    $('#mOk').style.display = 'none'; $('#modal').classList.add('on');
+    const done = (v) => { $('#modal').classList.remove('on'); $('#mOk').style.display = ''; $('#mCancel').onclick = null; res(v); };
+    document.querySelectorAll('#asb button').forEach((b) => b.onclick = () => done(b.dataset.k));
+    $('#mCancel').onclick = () => done(null);
+  });
+  if (!choice) return;
+  let moved = 0;
+  for (const f of S.files) {
+    const m = S.records[keyFor(f, f.starts[0])]?.meta || f.metaByStart[f.starts[0]] || {};
+    const parts = { c: m.country, o: m.outlet, y: m.year };
+    const path = choice.split('').map((k) => parts[k]).filter(Boolean);
+    const folder = path.length ? path.join('/') : 'Unsorted';
+    if (f.folder !== folder) { f.folder = folder; persistFile(f); moved++; }
+    if (!S.folders.includes(folder)) S.folders.push(folder);
+  }
+  persistFolders(); sortFiles(); rebuildArticles(); renderFolders();
+  toast(`Sorted ${moved} PDFs`);
+}
+async function removeSelected() {
+  const files = S.files.filter((f) => S.selected.has(f.id));
+  if (!files.length) return;
+  if (!(await ask(`<h3>Remove ${files.length} PDF${files.length > 1 ? 's' : ''} from your library?</h3><p class="small">The saved PDF files are deleted. Codes you already saved for them stay in your data.</p>`, 'Remove'))) return;
+  for (const f of files) {
+    if (f.assetId && S.assets) { try { await S.assets.delete(f.assetId); } catch (e) { console.warn(e); } }
+    if (S.cloud) cloudWrite(() => libCol().doc(f.id).delete());
+  }
+  S.files = S.files.filter((f) => !S.selected.has(f.id));
+  S.selected.clear(); S.cur = -1; viewId = null;
+  rebuildArticles(); renderFolders(); libState(); goNext(-1);
+}
+
+/* ---------- viewer ---------- */
+let viewDoc = null, viewId = null, renderTok = 0;
+async function openArticle(i) {
+  if (i < 0 || i >= S.articles.length) return;
+  const startKey = S.articles[i].key;
+  if (libOverlay()) setLib(false);
+  S.cur = i;
+  let a = S.articles[i];
+  if (!S.files[a.fi].scanned) {
+    $('#pages').innerHTML = '<div class="status">Reading the PDF…</div>';
+    await scanFile(a.fi);
+    // after scan, the article list may have changed: find the first article of this file
+    const idx = S.articles.findIndex((x) => x.fi === a.fi && (x.key === startKey || x.start === 1)) ;
+    S.cur = idx >= 0 ? idx : S.articles.findIndex((x) => x.fi === a.fi);
+    a = S.articles[S.cur];
+    // jump to first un-done article in this file if the first is done
+    if (isDone(a.key)) { const j = S.articles.findIndex((x) => x.fi === a.fi && !isDone(x.key)); if (j >= 0) { S.cur = j; a = S.articles[j]; } }
+  }
+  const f = S.files[a.fi];
+  // set up the form
+  const rec = S.mode === 'recode' ? S.recodes[a.key] : S.records[a.key];
+  const baseMeta = S.records[a.key]?.meta || f.metaByStart[a.start] || guessMeta([], f.name);
+  S.meta = { ...baseMeta, ...(S.mode === 'code' && rec ? rec.meta : {}) };
+  S.form = rec ? { ...rec.codes } : {};
+  S.activeQ = firstUnanswered(); S.confirmMissing = false; S.editMeta = false; S.openedAt = Date.now();
+  renderForm(); renderQueue(true);
+  $('#rangeLbl').textContent = `${f.name}, ${a.start === a.end ? 'page ' + a.start : 'pages ' + a.start + '–' + a.end} of ${f.numPages || '?'}`;
+  $('#rangeLbl').title = $('#rangeLbl').textContent;
+  $('#btnSplit').disabled = a.end <= a.start;
+  $('#btnMerge').disabled = !(S.articles[S.cur + 1] && S.articles[S.cur + 1].fi === a.fi);
+  // render pages
+  const tok = ++renderTok;
+  try {
+    if (viewId !== f.id || !viewDoc) {
+      if (viewDoc) { viewDoc.destroy(); viewDoc = null; }
+      $('#pages').innerHTML = '<div class="status">Opening the PDF…</div>';
+      viewDoc = await pdfjsLib.getDocument({ data: await fileBytes(f) }).promise; viewId = f.id;
+      if (!f.pages) { const d = viewDoc; extractPages(d).then((p) => { f.pages = p; if (S.articles[S.cur]?.fi === fileIndex(f)) renderText(); }).catch(() => {}); }
+    }
+    if (tok !== renderTok) return;
+    await renderPages(a, tok);
+  } catch (e) {
+    $('#pages').innerHTML = `<div class="drop"><h2>This PDF did not open</h2><p>${esc(e.message || e)}</p></div>`;
+  }
+  renderText();
+}
+async function renderPages(a, tok) {
+  const box = $('#pages'); box.innerHTML = ''; box.scrollTop = 0;
+  const avail = Math.max(300, box.clientWidth - 40);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  for (let p = a.start; p <= a.end; p++) {
+    if (tok !== renderTok) return;
+    const page = await viewDoc.getPage(p);
+    const base = page.getViewport({ scale: 1 });
+    const scale = (avail / base.width) * S.zoom;
+    const vp = page.getViewport({ scale: scale * dpr });
+    const c = document.createElement('canvas');
+    c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+    c.style.width = Math.floor(vp.width / dpr) + 'px'; c.style.height = Math.floor(vp.height / dpr) + 'px';
+    box.append(c, el('div', { class: 'plabel' }, `page ${p}`));
+    await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+  }
+}
+function renderText() {
+  const a = S.articles[S.cur]; if (!a) return;
+  const f = S.files[a.fi];
+  const txt = (f.pages || []).slice(a.start - 1, a.end).map((ls) => ls.join('\n')).join('\n\n');
+  let html = esc(txt || (f.pages ? 'This PDF has no text layer, so only the page view works for it.' : 'Reading text…'));
+  const terms = S.settings.hl.split(',').map((t) => t.trim()).filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (terms.length) html = html.replace(new RegExp(`\\b(${terms.join('|')})\\b`, 'gi'), '<mark>$1</mark>');
+  $('#textview').innerHTML = '<div class="paper">' + html + '</div>';
+}
+function setTextMode(on) {
+  const was = S.textMode; S.textMode = on;
+  $('#pages').style.display = on ? 'none' : 'flex';
+  $('#textview').style.display = on ? 'block' : 'none';
+  document.querySelectorAll('#viewSeg button').forEach((b) => b.classList.toggle('on', (b.dataset.m === 'text') === on));
+  if (was && !on) rerender();
+}
+
+/* ---------- queue ---------- */
+const isDone = (key) => S.mode === 'recode' ? !!S.recodes[key] : !!S.records[key];
+function queueItems() {
+  if (S.mode === 'recode' && S.sample) {
+    const idx = new Map(S.articles.map((a, i) => [a.key, i]));
+    return S.sample.keys.map((k) => ({ key: k, i: idx.has(k) ? idx.get(k) : -1 }));
+  }
+  return S.articles.map((a, i) => ({ key: a.key, i }));
+}
+function renderQueue(onlyCur) {
+  const list = $('#qlist');
+  if (onlyCur && list.childElementCount) {
+    for (const n of list.children) n.classList.toggle('cur', +n.dataset.i === S.cur);
+    const c = list.querySelector('.cur'); if (c) c.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  const filt = S.qFilter, q = $('#qSearch').value.trim().toLowerCase();
+  const frag = document.createDocumentFragment(); let shown = 0;
+  for (const it of queueItems()) {
+    const done = isDone(it.key);
+    if (filt === 'todo' && done && it.i !== S.cur) continue;
+    if (filt === 'done' && !done) continue;
+    const a = it.i >= 0 ? S.articles[it.i] : null;
+    const f = a ? S.files[a.fi] : null;
+    if (f && !inFolder(f, S.folderSel)) continue;
+    const rec = S.records[it.key];
+    const meta = rec?.meta || (f && f.metaByStart[a.start]) || {};
+    const title = meta.headline || (f ? f.name : it.key.replace(/~p\d+$/, ''));
+    const sub = a ? [!S.folderSel && f.folder, f.name + (f.starts.length > 1 ? `, p. ${a.start}–${a.end}` : ''), f.file && !f.assetId && S.assets && S.cloud && !f.uploadFailed ? 'saving' : ''].filter(Boolean).join('  /  ') : 'PDF not in the library yet';
+    if (q && !(title + ' ' + sub).toLowerCase().includes(q)) continue;
+    if (++shown > 1500) break;
+    const ex = S.mode === 'code' && rec?.excluded;
+    const seld = f && S.selected.has(f.id);
+    frag.append(el('div', { class: 'qi' + (it.i === S.cur && it.i >= 0 && !S.selecting ? ' cur' : '') + (seld ? ' sel' : ''), 'data-i': it.i, onclick: () => {
+        if (S.selecting) { if (f) { if (S.selected.has(f.id)) S.selected.delete(f.id); else S.selected.add(f.id); renderQueue(); renderFolders(); } return; }
+        if (it.i >= 0) openArticle(it.i); else toast('Add this PDF first: ' + it.key.replace(/~p\d+$/, '')); } },
+      S.selecting ? el('span', { class: 'cb' + (seld ? ' on' : '') }, seld ? '✓' : '') : el('span', { class: 'dot' + (done ? (ex ? ' ex' : ' done') : '') }),
+      el('div', {}, el('div', { class: 't' }, title), el('div', { class: 's' }, sub))));
+  }
+  list.innerHTML = ''; list.append(frag);
+  if (!shown) list.append(el('p', { class: 'small muted', style: 'padding:8px 10px' }, !S.files.length ? 'Your library is empty. Add PDFs above or drop them anywhere on the page.' : filt === 'todo' ? 'Everything here is coded.' : 'Nothing matches.'));
+  const c = list.querySelector('.cur'); if (c) c.scrollIntoView({ block: 'nearest' });
+}
+
+/* ---------- form ---------- */
+const vars = () => S.codebook.vars;
+const isAnswered = (v) => S.form[v.name] !== undefined && S.form[v.name] !== '' && S.form[v.name] !== null;
+const required = (v) => v.type === 'binary' || v.type === 'single';
+function firstUnanswered() { const i = vars().findIndex((v) => required(v) && !isAnswered(v)); return i < 0 ? 0 : i; }
+function keepScroll(fn) { const st = $('#formbody').scrollTop; fn(); $('#formbody').scrollTop = st; }
+function renderHead() {
+  const box = $('#ahead'); box.innerHTML = '';
+  const a = S.articles[S.cur]; if (!a) return;
+  const m = S.meta;
+  box.append(el('div', { class: 'atitle' }, m.headline || S.files[a.fi].name));
+  const parts = [m.outlet && (m.country ? `${m.outlet}, ${m.country}` : m.outlet), m.date || m.year].filter(Boolean);
+  box.append(el('div', { class: 'ameta' }, el('span', {}, parts.join(', ') || 'Outlet and date not found'), el('button', { class: 'link small', onclick: () => { S.editMeta = !S.editMeta; renderHead(); } }, S.editMeta ? 'Done' : 'Edit details')));
+  if (!S.editMeta && m.outlet) return;
+  const pickOutlet = (o) => { S.meta.outlet = o.outlet; S.meta.country = o.country; renderHead(); };
+  const inp = (k, attrs = {}) => el('input', { value: S.meta[k] || '', oninput: (e) => { S.meta[k] = e.target.value; }, onchange: () => renderHead(), ...attrs });
+  box.append(el('div', { class: 'metaedit' },
+    el('label', {}, 'Outlet'), el('div', { class: 'chips' }, outletList().map((o) => el('button', { class: o.outlet === S.meta.outlet ? 'on' : '', onclick: () => pickOutlet(o) }, o.outlet))),
+    el('label', { for: 'mDate' }, 'Date'), el('div', { style: 'display:flex;gap:6px' }, inp('date', { id: 'mDate', placeholder: 'Date' }), inp('year', { id: 'mYear', placeholder: 'Year', style: 'width:80px' })),
+    el('label', { for: 'mHead' }, 'Headline'), inp('headline', { id: 'mHead' })));
+}
+function renderForm() {
+  const body = $('#formbody'); body.innerHTML = ''; $('#notes').innerHTML = '';
+  const a = S.articles[S.cur];
+  ['#btnSave', '#btnExclude', '#btnClear'].forEach((q) => $(q).disabled = !a);
+  $('#btnExclude').style.display = S.mode === 'recode' ? 'none' : '';
+  renderHead();
+  if (!a) { body.append(el('p', { class: 'muted', style: 'padding:20px' }, 'Open an article to see the coding questions.')); $('#formMsg').classList.remove('on'); return; }
+  const rec = S.mode === 'recode' ? S.recodes[a.key] : S.records[a.key];
+  if (S.mode === 'recode') $('#notes').append(el('div', { class: 'note info' }, 'Recoding. Your first codes are hidden, so code this article fresh.'));
+  if (rec) $('#notes').append(el('div', { class: 'note ok' }, rec.excluded ? 'Excluded. Answer the questions and save to include it again.' : `Coded ${new Date(rec.savedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}. Saving again replaces those codes.`));
+  vars().forEach((v, qi) => {
+    const val = S.form[v.name];
+    const row = el('div', { class: 'qrow' + (qi === S.activeQ ? ' act' : '') + (isAnswered(v) ? ' done' : '') + (S.confirmMissing && required(v) && !isAnswered(v) ? ' miss' : ''), 'data-q': qi, onclick: () => { if (S.activeQ !== qi) { S.activeQ = qi; markActive(); } } },
+      el('div', { class: 'qn' }, qi + 1), el('div', { class: 'ql' }, v.label || v.name));
+    if (v.type === 'binary') {
+      row.append(el('div', { class: 'yn' },
+        el('button', { class: 'y' + (val === 1 ? ' sel' : ''), title: 'Yes (1 or Y)', onclick: (e) => { e.stopPropagation(); answer(qi, 1); } }, 'Yes'),
+        el('button', { class: 'n' + (val === 0 ? ' sel' : ''), title: 'No (0 or N)', onclick: (e) => { e.stopPropagation(); answer(qi, 0); } }, 'No')));
+    } else row.append(el('span'));
+    if (v.help || v.name) row.append(el('div', { class: 'qh' }, v.help ? v.help + ' ' : '', el('code', {}, v.name)));
+    if (v.type === 'single') {
+      row.append(el('div', { class: 'opts wide' }, (v.options || []).map((o) => el('button', { class: val === o.code ? 'sel' : '', onclick: (e) => { e.stopPropagation(); answer(qi, o.code); } }, el('span', { class: 'k' }, String(o.code)), o.label))));
+    } else if (v.type === 'number') {
+      row.append(el('div', { class: 'wide' }, el('input', { type: 'number', 'aria-label': v.label, value: val ?? '', onfocus: () => { S.activeQ = qi; markActive(); }, oninput: (e) => { S.form[v.name] = e.target.value === '' ? '' : Number(e.target.value); } })));
+    } else if (v.type === 'text') {
+      row.append(el('div', { class: 'wide' }, el('textarea', { rows: 2, 'aria-label': v.label, onfocus: () => { S.activeQ = qi; markActive(); }, oninput: (e) => { S.form[v.name] = e.target.value; } }, val ?? '')));
+    }
+    body.append(row);
+  });
+  const miss = vars().filter((v) => required(v) && !isAnswered(v)).length;
+  const fm = $('#formMsg');
+  fm.classList.toggle('on', !!(S.confirmMissing && miss));
+  fm.textContent = `${miss} question${miss > 1 ? 's are' : ' is'} unanswered and will be saved as missing. Press Enter again to save anyway.`;
+}
+function markActive() {
+  document.querySelectorAll('#formbody .qrow').forEach((n) => n.classList.toggle('act', +n.dataset.q === S.activeQ));
+  const n = document.querySelector(`#formbody .qrow[data-q="${S.activeQ}"]`); if (n) n.scrollIntoView({ block: 'nearest' });
+}
+function answer(qi, val) {
+  const v = vars()[qi];
+  S.form[v.name] = S.form[v.name] === val ? undefined : val;
+  // advance to next question
+  if (S.form[v.name] !== undefined) { let j = qi + 1; while (j < vars().length && vars()[j].type !== 'binary' && vars()[j].type !== 'single' && isAnswered(vars()[j])) j++; S.activeQ = Math.min(j, vars().length - 1); }
+  const st = $('#formbody').scrollTop; renderForm(); $('#formbody').scrollTop = st; markActive();
+}
+async function save(excluded = false) {
+  const a = S.articles[S.cur]; if (!a) return;
+  const miss = vars().filter((v) => required(v) && !isAnswered(v)).length;
+  if (!excluded && miss && !S.confirmMissing) { S.confirmMissing = true; const st = $('#formbody').scrollTop; renderForm(); $('#formbody').scrollTop = st; return; }
+  const codes = {}; for (const v of vars()) if (isAnswered(v)) codes[v.name] = S.form[v.name];
+  const secs = Math.round((Date.now() - S.openedAt) / 1000);
+  const f = S.files[a.fi];
+  if (S.mode === 'recode') {
+    const prev = S.recodes[a.key];
+    S.recodes[a.key] = { key: a.key, codes, seconds: (prev?.seconds || 0) + secs, savedAt: Date.now() };
+    persistRecode(S.recodes[a.key]);
+  } else {
+    const prev = S.records[a.key];
+    const r = { key: a.key, file: f.name, page_start: a.start, page_end: a.end, meta: { ...S.meta }, codes: excluded ? {} : codes, excluded: excluded ? 1 : 0,
+      seconds: (prev?.seconds || 0) + secs, firstSavedAt: prev?.firstSavedAt || Date.now(), savedAt: Date.now() };
+    S.records[a.key] = r; persistRecord(r);
+  }
+  toast(excluded ? 'Excluded' : 'Saved');
+  renderProgress(); renderQueue();
+  await goNext(S.cur);
+}
+async function goNext(from) {
+  const items = queueItems();
+  const pos = items.findIndex((it) => it.i === from);
+  for (let k = pos + 1; k < items.length; k++) if (items[k].i >= 0 && !isDone(items[k].key)) return openArticle(items[k].i);
+  for (let k = 0; k <= pos; k++) if (items[k].i >= 0 && !isDone(items[k].key)) return openArticle(items[k].i);
+  if (from < 0 && S.articles.length) return openArticle(0);
+  renderQueue();
+  if (S.mode === 'recode') toast('All loaded sample articles are recoded. See the Reliability tab.', 3500);
+  else if (S.articles.length) toast('Every loaded article is coded.', 3000);
+}
+function step(dir) {
+  const items = queueItems().filter((it) => it.i >= 0);
+  const pos = items.findIndex((it) => it.i === S.cur);
+  const n = items[pos + dir]; if (n) openArticle(n.i);
+}
+
+/* ---------- split / merge ---------- */
+async function splitHere() {
+  const a = S.articles[S.cur]; if (!a || a.end <= a.start) return;
+  const ok = await ask(`<h3>Split this article</h3><div class="small mute">This article covers pages ${a.start}–${a.end}. The current article will end at the page you give; the following pages become a new article.</div><p><label>Last page of this article <input id="splitP" type="number" min="${a.start}" max="${a.end - 1}" value="${a.start}" style="width:80px"></label></p>`, 'Split');
+  if (!ok) return;
+  const p = +document.getElementById('splitP').value;
+  if (!(p >= a.start && p < a.end)) { toast('Page out of range'); return; }
+  const f = S.files[a.fi];
+  f.starts = [...new Set([...f.starts, p + 1])].sort((x, y) => x - y);
+  if (f.pages) f.metaByStart[p + 1] = guessMeta(f.pages.slice(p, p + 2).flat(), f.name);
+  S.fileSplits = S.fileSplits || {}; (S.fileSplits[f.name] = S.fileSplits[f.name] || []).push(p + 1);
+  if (S.records[a.key]) { const r = S.records[a.key]; r.page_end = p; persistRecord(r); }
+  rebuildArticles(); openArticle(S.articles.findIndex((x) => x.key === a.key));
+}
+async function mergeNext() {
+  const a = S.articles[S.cur], b = S.articles[S.cur + 1];
+  if (!a || !b || b.fi !== a.fi) return;
+  if (S.records[b.key] && !(await ask(`<h3>Merge?</h3><div class="small">The next article (pages ${b.start}–${b.end}) is already coded. Merging deletes its codes.</div>`, 'Merge'))) return;
+  const f = S.files[a.fi];
+  f.starts = f.starts.filter((s) => s !== b.start);
+  if (S.fileSplits?.[f.name]) S.fileSplits[f.name] = S.fileSplits[f.name].filter((s) => s !== b.start);
+  if (S.records[b.key]) deleteRecord(b.key);
+  if (S.records[a.key]) { const r = S.records[a.key]; r.page_end = b.end; persistRecord(r); }
+  rebuildArticles(); openArticle(S.articles.findIndex((x) => x.key === a.key));
+}
+
+/* ---------- progress ---------- */
+function renderProgress() {
+  const recs = Object.values(S.records);
+  const done = recs.length, target = Math.max(1, +S.settings.target || 1);
+  $('#progText').innerHTML = `<b>${done}</b> of ${target} coded`;
+  $('#progBar').style.width = Math.min(100, (done / target) * 100) + '%';
+  const today = todayStr();
+  const nToday = recs.filter((r) => dayOf(r.firstSavedAt || r.savedAt) === today).length;
+  let pace = `${nToday} today`;
+  if (S.settings.deadline) {
+    const dl = new Date(S.settings.deadline + 'T23:59:59'); const now = new Date();
+    const days = Math.max(1, Math.ceil((dl - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000));
+    const left = Math.max(0, target - done + nToday);
+    pace += left > 0 ? `, ${Math.ceil(left / days)} a day to finish on time` : ', target reached';
+  }
+  const timed = recs.filter((r) => r.seconds > 0 && r.seconds < 3600);
+  if (timed.length >= 3) { const avg = timed.reduce((s, r) => s + r.seconds, 0) / timed.length; $('#paceText').title = `About ${avg < 90 ? Math.round(avg) + ' seconds' : (avg / 60).toFixed(1) + ' minutes'} per article`; }
+  $('#paceText').textContent = pace;
+}
+
+/* ---------- codebook editor ---------- */
+function sanitizeName(s) { let x = (s || '').trim().replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, ''); if (!/^[A-Za-z]/.test(x)) x = 'v' + x; return x.slice(0, 64); }
+const RESERVED = ['article_id', 'file', 'page_start', 'page_end', 'outlet', 'outlet_name', 'country', 'country_name', 'year', 'pub_date', 'headline', 'word_count', 'excluded', 'coded_at', 'coding_seconds'];
+function optText(v) { return (v.options || []).map((o) => `${o.code}=${o.label}`).join('; '); }
+function parseOpts(t) { return t.split(/[;\n]/).map((s) => s.trim()).filter(Boolean).map((s, i) => { const m = s.match(/^(-?\d+(?:\.\d+)?)\s*[=:]\s*(.+)$/); return m ? { code: Number(m[1]), label: m[2].trim() } : { code: i + 1, label: s }; }); }
+function renderCodebook() {
+  const box = $('#vlist'); box.innerHTML = '';
+  vars().forEach((v, i) => {
+    const row = el('div', { class: 'vrow' },
+      el('div', { class: 'num' }, i + 1),
+      el('input', { value: v.name, title: 'Variable name (column in SPSS)', onchange: (e) => { let n = sanitizeName(e.target.value); if (RESERVED.includes(n.toLowerCase()) || vars().some((x, j) => j !== i && x.name.toLowerCase() === n.toLowerCase())) { toast('That name is taken'); e.target.value = v.name; return; } v.name = n; e.target.value = n; persistCodebook(); } }),
+      el('input', { value: v.label || '', placeholder: 'Question / label', onchange: (e) => { v.label = e.target.value; persistCodebook(); } }),
+      el('div', { class: 'seg' }, [['binary', '1/0'], ['single', 'Categories'], ['number', 'Number'], ['text', 'Text']].map(([k, l]) => el('button', { class: v.type === k ? 'on' : '', title: k === 'binary' ? 'Yes = 1, No = 0' : '', onclick: () => { v.type = k; if (k === 'single' && !v.options?.length) v.options = [{ code: 1, label: 'Option A' }, { code: 2, label: 'Option B' }]; persistCodebook(); renderCodebook(); } }, l))),
+      el('div', { style: 'display:flex;gap:2px' },
+        el('button', { class: 'quiet', title: 'Move up', onclick: () => { if (i) { const a = vars(); [a[i - 1], a[i]] = [a[i], a[i - 1]]; persistCodebook(); renderCodebook(); } } }, '↑'),
+        el('button', { class: 'quiet', title: 'Move down', onclick: () => { const a = vars(); if (i < a.length - 1) { [a[i + 1], a[i]] = [a[i], a[i + 1]]; persistCodebook(); renderCodebook(); } } }, '↓'),
+        el('button', { class: 'quiet', title: 'Delete', onclick: async () => { if (await ask(`Delete <b>${esc(v.name)}</b>? Codes already saved for it stay in the backup but leave the export.`, 'Delete')) { vars().splice(i, 1); persistCodebook(); renderCodebook(); } } }, '✕')));
+    if (v.type === 'single') row.append(el('input', { class: 'opttext', value: optText(v), placeholder: '1=Market; 2=Governance; 3=Capability', onchange: (e) => { v.options = parseOpts(e.target.value); e.target.value = optText(v); persistCodebook(); } }));
+    row.append(el('input', { class: 'helptext', value: v.help || '', placeholder: 'Coding instructions shown under the question (optional)', onchange: (e) => { v.help = e.target.value; persistCodebook(); } }));
+    box.append(row);
+  });
+}
+function parseBulk(t) {
+  const out = [], seen = new Set();
+  for (const line of t.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.split('|').map((s) => s.trim());
+    let name = sanitizeName(parts[0]); if (RESERVED.includes(name.toLowerCase())) name = name + '_v';
+    while (seen.has(name.toLowerCase())) name += '_2'; seen.add(name.toLowerCase());
+    const ty = (parts[2] || 'binary').trim();
+    const v = { name, label: parts[1] || name, help: parts.slice(3).join(' | ') };
+    if (/^single/i.test(ty) || /^cat/i.test(ty)) { v.type = 'single'; v.options = parseOpts(ty.replace(/^\w+\s*:?/, '')); }
+    else if (/^num/i.test(ty)) v.type = 'number';
+    else if (/^text/i.test(ty)) v.type = 'text';
+    else v.type = 'binary';
+    out.push(v);
+  }
+  return out;
+}
+function codebookToText() {
+  return vars().map((v) => [v.name, v.label || '', v.type === 'single' ? 'single: ' + optText(v) : v.type, v.help || ''].join(' | ').replace(/\s\|\s$/, '')).join('\n');
+}
+
+/* ---------- export ---------- */
+function buildTable(includeEx = true) {
+  const outs = outletList(), countries = countryList();
+  const recs = Object.values(S.records).filter((r) => includeEx || !r.excluded).sort((a, b) => natCmp(a.key, b.key));
+  const cols = [
+    { name: 'article_id', label: 'Article ID (file and start page)', type: 'str' },
+    { name: 'file', label: 'PDF file', type: 'str' },
+    { name: 'folder', label: 'Library folder', type: 'str' },
+    { name: 'page_start', label: 'First page in PDF', type: 'num', measure: 'scale' },
+    { name: 'page_end', label: 'Last page in PDF', type: 'num', measure: 'scale' },
+    { name: 'outlet', label: 'Outlet', type: 'num', valueLabels: Object.fromEntries(outs.map((o, i) => [i + 1, o.outlet])) },
+    { name: 'country', label: 'Country', type: 'num', valueLabels: Object.fromEntries(countries.map((c, i) => [i + 1, c])) },
+    { name: 'year', label: 'Publication year', type: 'num', measure: 'scale' },
+    { name: 'pub_date', label: 'Publication date', type: 'str' },
+    { name: 'headline', label: 'Headline', type: 'str' },
+    { name: 'excluded', label: 'Excluded from analysis', type: 'num', valueLabels: { 0: 'No', 1: 'Yes' } },
+  ];
+  for (const v of vars()) {
+    if (v.type === 'binary') cols.push({ name: v.name, label: v.label, type: 'num', valueLabels: { 0: 'No', 1: 'Yes' }, cb: v });
+    else if (v.type === 'single') cols.push({ name: v.name, label: v.label, type: 'num', valueLabels: Object.fromEntries((v.options || []).map((o) => [o.code, o.label])), cb: v });
+    else if (v.type === 'number') cols.push({ name: v.name, label: v.label, type: 'num', measure: 'scale', cb: v });
+    else cols.push({ name: v.name, label: v.label, type: 'str', cb: v });
+  }
+  cols.push({ name: 'coded_at', label: 'Date coded', type: 'str' }, { name: 'coding_seconds', label: 'Seconds spent coding', type: 'num', measure: 'scale' });
+  const rows = recs.map((r) => {
+    const oi = outs.findIndex((o) => o.outlet === r.meta?.outlet);
+    const ci = countries.indexOf(r.meta?.country);
+    const row = {
+      article_id: r.key, file: r.file, folder: (S.files.find((f) => r.key.startsWith(f.id + '~p')) || {}).folder || '', page_start: r.page_start, page_end: r.page_end,
+      outlet: oi >= 0 ? oi + 1 : '', country: ci >= 0 ? ci + 1 : '', year: r.meta?.year ? Number(r.meta.year) : '',
+      pub_date: r.meta?.date || '', headline: r.meta?.headline || '', excluded: r.excluded ? 1 : 0,
+      coded_at: (() => { const d = new Date(r.savedAt), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; })(), coding_seconds: r.seconds || '',
+      _outlet_name: r.meta?.outlet || '', _country_name: r.meta?.country || '',
+    };
+    for (const v of vars()) { const x = r.codes?.[v.name]; row[v.name] = x === undefined ? '' : x; }
+    return row;
+  });
+  for (const c of cols) if (c.type === 'str') c.width = Math.min(255, Math.max(8, ...rows.map((r) => new TextEncoder().encode(String(r[c.name] ?? '')).length)));
+  return { cols, rows };
+}
+function csvOf(cols, rows, withNames = true) {
+  const head = [];
+  for (const c of cols) { head.push(c.name); if (withNames && c.name === 'outlet') head.push('outlet_name'); if (withNames && c.name === 'country') head.push('country_name'); }
+  const q = (v) => { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const lines = [head.join(',')];
+  for (const r of rows) {
+    const out = [];
+    for (const c of cols) { out.push(q(r[c.name])); if (withNames && c.name === 'outlet') out.push(q(r._outlet_name)); if (withNames && c.name === 'country') out.push(q(r._country_name)); }
+    lines.push(out.join(','));
+  }
+  return '﻿' + lines.join('\r\n') + '\r\n';
+}
+function codebookTxt(cols) {
+  return cols.map((c) => `${c.name}\t${c.label || ''}${c.valueLabels ? '\n' + Object.entries(c.valueLabels).map(([k, l]) => `\t\t${k} = ${l}`).join('\n') : ''}`).join('\n');
+}
+function rScript(cols) {
+  const L = ['# Load the coded data with labels', '# setwd() to the folder with coded_data.csv first', 'd <- read.csv("coded_data.csv", stringsAsFactors = FALSE, fileEncoding = "UTF-8-BOM")', ''];
+  for (const c of cols) if (c.valueLabels && Object.keys(c.valueLabels).length) {
+    const ks = Object.keys(c.valueLabels), ls = Object.values(c.valueLabels).map((x) => JSON.stringify(String(x)));
+    L.push(`d$${c.name}_f <- factor(d$${c.name}, levels = c(${ks.join(', ')}), labels = c(${ls.join(', ')}))`);
+  }
+  L.push('', '# Variable labels', 'var_labels <- c(', cols.map((c) => `  ${c.name} = ${JSON.stringify(c.label || '')}`).join(',\n'), ')', '', '# Alternative: haven::read_sav("coded_data.sav") keeps SPSS labels directly', 'str(d)');
+  return L.join('\n') + '\n';
+}
+function pyScript(cols) {
+  const L = ['"""Load the coded data with labels. Run from the folder with coded_data.csv."""', 'import pandas as pd', '', 'd = pd.read_csv("coded_data.csv", encoding="utf-8-sig")', '', 'value_labels = {'];
+  for (const c of cols) if (c.valueLabels && Object.keys(c.valueLabels).length) L.push(`    ${JSON.stringify(c.name)}: {${Object.entries(c.valueLabels).map(([k, l]) => `${k}: ${JSON.stringify(String(l))}`).join(', ')}},`);
+  L.push('}', 'for col, labels in value_labels.items():', '    d[col + "_label"] = d[col].map(labels)', '', 'variable_labels = {');
+  for (const c of cols) L.push(`    ${JSON.stringify(c.name)}: ${JSON.stringify(c.label || '')},`);
+  L.push('}', '', '# Alternative: import pyreadstat; d, meta = pyreadstat.read_sav("coded_data.sav")', 'print(d.head())');
+  return L.join('\n') + '\n';
+}
+async function offer(filename, data) {
+  if (!S.dl) {
+    try {
+      const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
+      const link = el('a', { href: url, download: filename }); document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000); toast('Downloaded ' + filename); return;
+    } catch {}
+    if (/\.csv$/.test(filename) && typeof data === 'string') { $('#copyCard').style.display = ''; $('#copyArea').value = data; toast('Downloads are blocked here. Copy the CSV below.'); }
+    else toast('Downloads are blocked in this view.', 4000);
+    return;
+  }
+  try { await S.dl.save({ filename, data }); toast('Saved ' + filename); }
+  catch (e) { if (e?.code === 'declined') return; if (e?.code === 'rate_limited') toast('A save prompt is already open.'); else toast('Could not save: ' + (e?.message || e?.code || e), 4000); }
+}
+async function doExport(kind) {
+  const stamp = todayStr();
+  if (kind === 'backup') {
+    const data = JSON.stringify({ app: 'chota', version: 1, exportedAt: new Date().toISOString(), codebook: S.codebook, settings: S.settings, records: S.records, recodes: S.recodes, sample: S.sample, fileSplits: S.fileSplits || {} }, null, 1);
+    return offer(`coding_backup_${stamp}.json`, data);
+  }
+  const { cols, rows } = buildTable(!$('#expEx').checked);
+  if (!rows.length) { toast('Nothing coded yet.'); return; }
+  if (kind === 'csv') return offer(`coded_data_${stamp}.csv`, csvOf(cols, rows));
+  if (kind === 'xlsx') {
+    const head = []; for (const c of cols) { head.push(c.name); if (c.name === 'outlet') head.push('outlet_name'); if (c.name === 'country') head.push('country_name'); }
+    const aoa = [head, ...rows.map((r) => { const o = []; for (const c of cols) { o.push(r[c.name] === '' ? null : r[c.name]); if (c.name === 'outlet') o.push(r._outlet_name); if (c.name === 'country') o.push(r._country_name); } return o; })];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'data');
+    const cbAoa = [['variable', 'label', 'code', 'value label']];
+    for (const c of cols) { cbAoa.push([c.name, c.label || '', null, null]); if (c.valueLabels) for (const [k, l] of Object.entries(c.valueLabels)) cbAoa.push([null, null, Number(k), l]); }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cbAoa), 'codebook');
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    return offer(`coded_data_${stamp}.xlsx`, new Uint8Array(buf));
+  }
+  if (kind === 'sav' || kind === 'r') {
+    const zip = new JSZip();
+    const sav = writeSav(cols, rows);
+    if (kind === 'sav') {
+      zip.file('coded_data.sav', sav);
+      zip.file('codebook.txt', codebookTxt(cols));
+      zip.file('README.txt', 'Open coded_data.sav in SPSS (File > Open > Data). Variable labels and value labels are already set.\nExported ' + new Date().toString() + '\n');
+    } else {
+      zip.file('coded_data.csv', csvOf(cols, rows));
+      zip.file('coded_data.sav', sav);
+      zip.file('load_data.R', rScript(cols));
+      zip.file('load_data.py', pyScript(cols));
+      zip.file('codebook.txt', codebookTxt(cols));
+    }
+    const blob = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+    return offer(kind === 'sav' ? `coded_data_spss_${stamp}.zip` : `coded_data_R_python_${stamp}.zip`, blob);
+  }
+}
+async function restore(file) {
+  let data; try { data = JSON.parse(await file.text()); } catch { toast('That file is not a backup.'); return; }
+  if (data.app !== 'chota' && data.app !== 'corpus-coder') { toast('That file is not a Chota backup.'); return; }
+  const n = Object.keys(data.records || {}).length;
+  if (!(await ask(`<h3>Restore backup?</h3><div class="small">${n} coded articles from ${esc(data.exportedAt || '')}. Articles in the backup replace the same articles here when the backup copy is newer. The codebook and settings are replaced.</div>`, 'Restore'))) return;
+  S.codebook = data.codebook || S.codebook; S.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings || {});
+  S.fileSplits = data.fileSplits || S.fileSplits;
+  for (const [k, r] of Object.entries(data.records || {})) if (!S.records[k] || (S.records[k].savedAt || 0) < (r.savedAt || 0)) { S.records[k] = r; cloudWrite(() => codesCol().doc(safeSeg(k)).set(r)); }
+  for (const [k, r] of Object.entries(data.recodes || {})) if (!S.recodes[k] || (S.recodes[k].savedAt || 0) < (r.savedAt || 0)) { S.recodes[k] = r; cloudWrite(() => recodesCol().doc(safeSeg(k)).set(r)); }
+  if (data.sample) S.sample = data.sample;
+  lsSet('cc_records', S.records); lsSet('cc_recodes', S.recodes);
+  persistCodebook(); persistSettings(); persistSample();
+  toast('Backup restored'); refreshAll();
+}
+
+/* ---------- reliability ---------- */
+function renderRecode() {
+  const coded = Object.values(S.records).filter((r) => !r.excluded);
+  const sm = S.sample;
+  $('#startRecode').disabled = !sm;
+  $('#startRecode').style.display = S.mode === 'recode' ? 'none' : '';
+  $('#stopRecode').style.display = S.mode === 'recode' ? '' : 'none';
+  if (sm) {
+    const done = sm.keys.filter((k) => S.recodes[k]).length;
+    const first = Math.min(...sm.keys.map((k) => S.records[k]?.savedAt || Date.now()));
+    const daysSince = Math.floor((Date.now() - first) / 86400000);
+    $('#sampInfo').innerHTML = `Sample of <b>${sm.keys.length}</b> articles drawn ${new Date(sm.drawnAt).toLocaleDateString()} · <b>${done}</b> recoded. ${daysSince < 7 ? `<span style="color:var(--warn)">The earliest sample article was coded ${daysSince} day${daysSince === 1 ? '' : 's'} ago; a gap of about a week makes the retest more credible.</span>` : ''}`;
+  } else $('#sampInfo').textContent = `${coded.length} coded articles available to sample from.`;
+  // results
+  const keys = (sm?.keys || []).filter((k) => S.recodes[k] && S.records[k] && !S.records[k].excluded);
+  const rows = [];
+  for (const v of vars()) {
+    if (v.type === 'text') continue;
+    const units = keys.map((k) => [S.records[k].codes?.[v.name], S.recodes[k].codes?.[v.name]]).filter((u) => u[0] !== undefined && u[0] !== '' && u[1] !== undefined && u[1] !== '');
+    const agree = units.filter((u) => String(u[0]) === String(u[1])).length;
+    const alpha = units.length >= 2 ? kAlphaNominal(units) : null;
+    rows.push({ name: v.name, label: v.label, n: units.length, pct: units.length ? agree / units.length : null, alpha });
+  }
+  S.relRows = rows;
+  $('#dlRel').disabled = !keys.length;
+  if (!keys.length) { $('#relTable').innerHTML = 'Results appear once some sample articles are recoded.'; return; }
+  const fmt = (x, d = 2) => x == null ? '<span class="mute">n/a</span>' : x.toFixed(d).replace(/^0\./, '.').replace(/^-0\./, '-.');
+  $('#relTable').innerHTML = `<table><tr><th>Variable</th><th>Units</th><th>% agreement</th><th>Krippendorff's α (nominal)</th></tr>${rows.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="mute small">${esc(r.label || '')}</div></td><td>${r.n}</td><td>${r.pct == null ? 'n/a' : (r.pct * 100).toFixed(1) + '%'}</td><td class="${r.alpha != null && r.alpha < 0.667 ? 'bad' : ''}">${fmt(r.alpha)}</td></tr>`).join('')}</table><div class="small mute" style="margin-top:8px">α shows n/a when a variable has no variation in the sample (all codes identical), where percent agreement is the figure to report.</div>`;
+}
+function drawSample() {
+  const coded = Object.values(S.records).filter((r) => !r.excluded).map((r) => r.key);
+  if (coded.length < 2) { toast('Code some articles first.'); return; }
+  const pct = Math.min(100, Math.max(1, +$('#sampPct').value || 10));
+  const n = Math.max(2, Math.round(coded.length * pct / 100));
+  const arr = coded.slice();
+  for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+  S.sample = { keys: arr.slice(0, n), drawnAt: Date.now(), pct };
+  persistSample(); renderRecode(); toast(`Drew ${n} articles`);
+}
+function setMode(m) {
+  S.mode = m;
+  document.body.classList.toggle('recoding', m === 'recode');
+  if (m === 'recode') setFilter('todo');
+  S.cur = -1; renderQueue(); renderRecode(); switchView('code'); goNext(-1);
+}
+
+/* ---------- settings ---------- */
+function renderSettings() {
+  $('#setTarget').value = S.settings.target; $('#setDeadline').value = S.settings.deadline || '';
+  $('#setOutlets').value = S.settings.outlets; $('#setHl').value = S.settings.hl; applyTheme();
+}
+
+/* ---------- views & wiring ---------- */
+function switchView(v) {
+  S.view = v;
+  document.querySelectorAll('#rail button[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  document.querySelectorAll('.view').forEach((s) => s.classList.toggle('on', s.id === 'v-' + v));
+  if (v === 'codebook') renderCodebook();
+  if (v === 'recode') renderRecode();
+  if (v === 'settings') renderSettings();
+  if (v === 'export') { const n = Object.keys(S.records).length, ex = Object.values(S.records).filter((r) => r.excluded).length; $('#expInfo').textContent = `${n} articles coded (${ex} excluded), ${vars().length} coding variables plus article details.`; }
+  if (v === 'code') { renderForm(); renderQueue(); }
+}
+function refreshAll() { applyTheme(); rebuildArticles(); renderForm(); renderProgress(); if (S.view && S.view !== 'code') switchView(S.view); }
+
+document.querySelectorAll('#rail button[data-v]').forEach((b) => b.onclick = () => switchView(b.dataset.v));
+$('#btnLoad').onclick = () => $('#fileIn').click();
+$('#btnLoadDir').onclick = () => $('#dirIn').click();
+$('#fileIn').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+$('#dirIn').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+function setFilter(f) { S.qFilter = f; document.querySelectorAll('#qFilter button').forEach((b) => b.classList.toggle('on', b.dataset.f === f)); renderQueue(); }
+document.querySelectorAll('#qFilter button').forEach((b) => b.onclick = () => setFilter(b.dataset.f));
+const libOverlay = () => window.innerWidth <= 1100;
+function setLib(open) {
+  const was = $('#v-code').classList.contains('lib');
+  $('#v-code').classList.toggle('lib', open); $('#railLib').classList.toggle('on', open);
+  try { localStorage.setItem('cc_lib', open ? '1' : '0'); } catch {}
+  if (was !== open && !libOverlay()) rerender();
+}
+function rerender() { clearTimeout(rsT); rsT = setTimeout(() => { const a = S.articles[S.cur]; if (a && viewDoc && !S.textMode) renderPages(a, ++renderTok); }, 120); }
+let rsT; window.addEventListener('resize', rerender);
+$('#btnQueue').onclick = () => setLib(!$('#v-code').classList.contains('lib'));
+$('#railLib').onclick = () => { if (S.view !== 'code') { switchView('code'); setLib(true); } else setLib(!$('#v-code').classList.contains('lib')); };
+$('#btnCloseQ').onclick = () => setLib(false);
+['#pages', '#textview', '#form'].forEach((q) => $(q).addEventListener('click', () => { if (libOverlay()) setLib(false); }));
+document.querySelectorAll('#viewSeg button').forEach((b) => b.onclick = () => setTextMode(b.dataset.m === 'text'));
+$('#btnKeys').onclick = showKeys;
+function showKeys() {
+  ask(`<h3>Keyboard shortcuts</h3><div class="keys"><span><span class="kbd">1</span> <span class="kbd">Y</span></span><span>Yes</span><span><span class="kbd">0</span> <span class="kbd">N</span></span><span>No</span><span><span class="kbd">1</span>–<span class="kbd">9</span></span><span>Pick a category by its number</span><span><span class="kbd">↑</span> <span class="kbd">↓</span></span><span>Move between questions</span><span><span class="kbd">Enter</span></span><span>Save and open the next article</span><span><span class="kbd">[</span> <span class="kbd">]</span></span><span>Previous or next article without saving</span><span><span class="kbd">T</span></span><span>Switch between page and text</span><span><span class="kbd">L</span></span><span>Open or close the library</span></div>`, 'Close');
+  $('#mCancel').style.display = 'none'; const ok = $('#mOk').onclick; $('#mOk').onclick = () => { $('#mCancel').style.display = ''; ok(); };
+}
+let dragN = 0;
+window.addEventListener('dragenter', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { dragN++; document.body.classList.add('dragging'); } });
+window.addEventListener('dragleave', () => { dragN = Math.max(0, dragN - 1); if (!dragN) document.body.classList.remove('dragging'); });
+window.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+window.addEventListener('drop', (e) => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); dragN = 0; document.body.classList.remove('dragging'); if (S.view !== 'code') switchView('code'); addFiles(e.dataTransfer.files); });
+const darkMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+const isDark = () => (S.settings.theme || (darkMQ && darkMQ.matches ? 'dark' : 'light')) === 'dark';
+const SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>';
+const MOON = '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>';
+function applyTheme() {
+  const t = S.settings.theme || '';
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  document.querySelectorAll('#themeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
+  const d = isDark(); $('#themeIcon').innerHTML = d ? SUN : MOON; $('#themeLbl').textContent = d ? 'Light' : 'Dark';
+}
+if (darkMQ && darkMQ.addEventListener) darkMQ.addEventListener('change', applyTheme);
+$('#themeBtn').onclick = () => { S.settings.theme = isDark() ? 'light' : 'dark'; lsSet('cc_settings', S.settings); applyTheme(); persistSettings(); };
+document.querySelectorAll('#themeSeg button').forEach((b) => b.onclick = () => { S.settings.theme = b.dataset.t; applyTheme(); persistSettings(); });
+$('#qSearch').oninput = () => renderQueue();
+$('#btnPrev').onclick = () => step(-1); $('#btnNext').onclick = () => step(1);
+$('#zIn').onclick = () => { S.zoom = Math.min(3, S.zoom + 0.15); $('#zLbl').textContent = Math.round(S.zoom * 100) + '%'; const a = S.articles[S.cur]; if (a && viewDoc) renderPages(a, ++renderTok); };
+$('#zOut').onclick = () => { S.zoom = Math.max(0.4, S.zoom - 0.15); $('#zLbl').textContent = Math.round(S.zoom * 100) + '%'; const a = S.articles[S.cur]; if (a && viewDoc) renderPages(a, ++renderTok); };
+$('#btnSplit').onclick = splitHere; $('#btnMerge').onclick = mergeNext;
+$('#btnSave').onclick = () => save(false);
+$('#btnExclude').onclick = () => save(true);
+$('#btnClear').onclick = () => { S.form = {}; S.activeQ = 0; S.confirmMissing = false; renderForm(); };
+$('#addVar').onclick = () => { let n = 'var' + (vars().length + 1); while (vars().some((v) => v.name === n)) n += '_'; vars().push({ name: n, label: '', type: 'binary', help: '' }); persistCodebook(); renderCodebook(); };
+$('#applyBulk').onclick = async () => {
+  const parsed = parseBulk($('#bulkCb').value);
+  if (!parsed.length) { toast('Nothing to read. One variable per line.'); return; }
+  if (!(await ask(`<h3>Replace the codebook?</h3><div class="small">${parsed.length} variables: ${parsed.map((v) => esc(v.name)).join(', ')}</div>`, 'Replace'))) return;
+  S.codebook = { vars: parsed }; persistCodebook(); renderCodebook(); renderForm(); toast('Codebook updated');
+};
+$('#loadExample').onclick = async () => { if (!(await ask('<h3>Load the example questions?</h3><p class="small">This replaces your current codebook with 16 example questions on AI orientation, actors, benefits, risks, tone and genre. Edit or delete any of them afterwards. Codes already saved keep their values.</p>', 'Load'))) return; S.codebook = JSON.parse(JSON.stringify(DEFAULT_CODEBOOK)); persistCodebook(); renderCodebook(); renderForm(); toast('Example questions loaded'); };
+$('#cbToText').onclick = () => { $('#bulkCb').value = codebookToText(); };
+document.querySelectorAll('[data-exp]').forEach((b) => b.onclick = () => doExport(b.dataset.exp));
+$('#btnNewFolder').onclick = newFolder; $('#btnAutoSort').onclick = autoSort; $('#btnDelFolder').onclick = deleteFolder;
+$('#btnSelect').onclick = () => { S.selecting = !S.selecting; S.selected.clear(); renderFolders(); renderQueue(); };
+$('#btnMoveSel').onclick = async () => { const files = S.files.filter((f) => S.selected.has(f.id)); if (!files.length) { toast('Tap PDFs in the list to select them'); return; } const to = await chooseFolder(`Move ${files.length} PDF${files.length > 1 ? 's' : ''} to`); if (to === null) return; moveFiles(files, to); S.selected.clear(); S.selecting = false; S.folderSel = to; if (to) { const ps = to.split('/'); for (let i = 1; i <= ps.length; i++) S.openFolders.add(ps.slice(0, i).join('/')); } renderFolders(); renderQueue(); toast('Moved'); };
+$('#btnRemoveSel').onclick = removeSelected;
+$('#btnRestore').onclick = () => $('#restoreIn').click();
+$('#restoreIn').onchange = (e) => { if (e.target.files[0]) restore(e.target.files[0]); e.target.value = ''; };
+$('#drawSample').onclick = async () => { if (S.sample && !(await ask('Draw a new sample? Recodes already done stay saved but may fall outside the new sample.', 'Draw new'))) return; drawSample(); };
+$('#startRecode').onclick = () => setMode('recode');
+$('#stopRecode').onclick = () => setMode('code');
+$('#dlRel').onclick = () => {
+  const lines = ['variable,label,units,percent_agreement,krippendorff_alpha_nominal'];
+  for (const r of S.relRows || []) lines.push([r.name, '"' + (r.label || '').replace(/"/g, '""') + '"', r.n, r.pct == null ? '' : (r.pct * 100).toFixed(1), r.alpha == null ? '' : r.alpha.toFixed(3)].join(','));
+  offer(`intracoder_reliability_${todayStr()}.csv`, lines.join('\r\n') + '\r\n');
+};
+$('#saveSettings').onclick = () => {
+  S.settings.target = Math.max(1, +$('#setTarget').value || 940); S.settings.deadline = $('#setDeadline').value;
+  S.settings.outlets = $('#setOutlets').value; S.settings.hl = $('#setHl').value;
+  persistSettings(); renderProgress(); renderText(); toast('Settings saved');
+};
+document.addEventListener('keydown', (e) => {
+  if ($('#modal').classList.contains('on')) { if (e.key === 'Enter') $('#mOk').click(); if (e.key === 'Escape') $('#mCancel').click(); return; }
+  if (e.key === 'Escape' && $('#v-code').classList.contains('lib')) { setLib(false); return; }
+  if (S.view !== 'code' || S.cur < 0) return;
+  const t = e.target, typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(false); return; }
+  if (typing) { if (e.key === 'Escape') t.blur(); if (e.key === 'Enter' && t.tagName === 'INPUT') { e.preventDefault(); t.blur(); } return; }
+  const v = vars()[S.activeQ];
+  if (e.key === 'Enter') { e.preventDefault(); save(false); return; }
+  if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); S.activeQ = Math.min(vars().length - 1, S.activeQ + 1); markActive(); return; }
+  if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); S.activeQ = Math.max(0, S.activeQ - 1); markActive(); return; }
+  if (e.key === '?') { showKeys(); return; }
+  if (e.key === 't' || e.key === 'T') { setTextMode(!S.textMode); return; }
+  if (e.key === 'l' || e.key === 'L') { setLib(!$('#v-code').classList.contains('lib')); return; }
+  if (e.key === '[') { step(-1); return; }
+  if (e.key === ']') { step(1); return; }
+  if (!v) return;
+  if (v.type === 'binary') {
+    if (e.key === '1' || e.key.toLowerCase() === 'y') { e.preventDefault(); answer(S.activeQ, 1); }
+    else if (e.key === '0' || e.key.toLowerCase() === 'n') { e.preventDefault(); answer(S.activeQ, 0); }
+  } else if (v.type === 'single') {
+    const o = (v.options || []).find((o) => String(o.code) === e.key);
+    if (o) { e.preventDefault(); answer(S.activeQ, o.code); }
+  } else if (e.key === 'Tab' || /^[0-9a-z]$/i.test(e.key)) {
+    const n = document.querySelector(`#formbody .qrow[data-q="${S.activeQ}"] input, #formbody .qrow[data-q="${S.activeQ}"] textarea`);
+    if (n) { n.focus(); }
+  }
+});
+window.addEventListener('beforeunload', () => { lsSet('cc_records', S.records); });
+
+/* ---------- boot ---------- */
+if (!window.pdfjsLib) { $('#pages').innerHTML = '<div class="drop"><h2>The PDF viewer did not load</h2><p>Check your internet connection, then reload the page.</p></div>'; }
+applyTheme(); setLib(lsGet('cc_lib', 0) === 1 && !libOverlay()); renderProgress(); renderForm(); renderQueue();
+initCloud();

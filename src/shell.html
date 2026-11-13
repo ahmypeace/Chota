@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chota</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+/* Layout idea: a reading desk in the style of ahmypeace.github.io. Navigation rail at the far left, the article page on a soft blush desk, the coding sheet beside it like a paper form, with Temple crimson marking where you are. */
+:root{
+  --bg:#FAF8F6; --desk:#F3EDEF; --sheet:#FFFFFF; --ink:#231F20; --ink-2:#4C4748; --ink-3:#746E70; --rule:#DED7D9; --rule-2:#F1ECED;
+  --pencil:#A41E35; --pencil-dark:#781426; --pencil-ink:#FFFFFF; --pencil-wash:#F3E8EA; --pencil-text:#A41E35;
+  --no-fill:#231F20; --no-ink:#FFFFFF;
+  --yes:#2E6B47; --yes-wash:#E4F0E8; --warn:#8C5A00; --warn-wash:#FFF2CF; --mark:#F6D3DA;
+  --ui:Roboto, Arial, sans-serif; --read:"Source Serif 4", Georgia, serif; --display:"Source Serif 4", Georgia, serif;
+  --r:0; --shadow:0 6px 20px rgba(35,31,32,.06); color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#231F20; --desk:#1B1819; --sheet:#2C2729; --ink:#FFFFFF; --ink-2:#C9C2C4; --ink-3:#958D90; --rule:#433B3E; --rule-2:#352F31;
+  --pencil:#E4A8B3; --pencil-dark:#EFBDC6; --pencil-ink:#231F20; --pencil-wash:#3D2A2F; --pencil-text:#EFBDC6;
+  --no-fill:#FFFFFF; --no-ink:#231F20;
+  --yes:#8FD1A8; --yes-wash:#1F3328; --warn:#F2C25B; --warn-wash:#3A2F12; --mark:#7A2E3C; --shadow:0 6px 20px rgba(0,0,0,.35); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#231F20; --desk:#1B1819; --sheet:#2C2729; --ink:#FFFFFF; --ink-2:#C9C2C4; --ink-3:#958D90; --rule:#433B3E; --rule-2:#352F31;
+  --pencil:#E4A8B3; --pencil-dark:#EFBDC6; --pencil-ink:#231F20; --pencil-wash:#3D2A2F; --pencil-text:#EFBDC6;
+  --no-fill:#FFFFFF; --no-ink:#231F20;
+  --yes:#8FD1A8; --yes-wash:#1F3328; --warn:#F2C25B; --warn-wash:#3A2F12; --mark:#7A2E3C; --shadow:0 6px 20px rgba(0,0,0,.35); color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:15px/1.5 var(--ui);color:var(--ink);background:var(--bg);display:flex;overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);padding:7px 12px;line-height:1.2}
+button:hover{border-color:var(--ink-3)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,.qrow:focus-visible{outline:2px solid var(--pencil);outline-offset:2px}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--pencil);border-color:var(--pencil);color:var(--pencil-ink);font-weight:700;letter-spacing:.03em}
+button.primary:hover{background:var(--pencil-dark);border-color:var(--pencil-dark)}
+button.quiet{background:transparent;border-color:transparent;color:var(--ink-2)}
+button.quiet:hover{color:var(--ink);background:var(--rule-2)}
+button.link{background:none;border:none;padding:0;color:var(--pencil-text);font-weight:500}
+input,textarea{font:inherit;color:var(--ink);background:var(--sheet);border:1px solid var(--rule);border-radius:2px;padding:7px 10px}
+textarea{width:100%;resize:vertical}
+code{font-size:.92em;background:var(--rule-2);padding:1px 5px;border-radius:4px}
+.muted,.mute{color:var(--ink-2)}
+button.quiet.on{background:var(--pencil-wash);color:var(--pencil)} .small{font-size:13px}
+svg.i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.kbd{display:inline-block;min-width:20px;text-align:center;font-size:12px;padding:1px 5px;border:1px solid var(--rule);border-bottom-width:2px;border-radius:5px;background:var(--sheet);color:var(--ink-2)}
+
+/* rail */
+#rail{width:78px;flex:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:14px 0 12px;background:var(--bg);border-right:1px solid var(--rule)}
+#rail .logo{font:700 19px/1 var(--display);letter-spacing:-.02em;margin:2px 0 14px;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--ink)}
+#rail .logo svg{width:26px;height:26px}
+#rail button{width:66px;border:none;background:transparent;border-radius:0;padding:8px 0 6px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:12px;color:var(--ink-2)}
+#rail button:hover{background:var(--rule-2);color:var(--ink)}
+#rail button.on{background:var(--pencil-wash);color:var(--pencil-text);font-weight:700;box-shadow:inset 3px 0 0 var(--pencil)}
+#rail .spacer{flex:1}
+#saveDot{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--ink-2);text-align:center;padding:0 4px;line-height:1.2}
+#saveDot i{width:9px;height:9px;border-radius:50%;background:var(--warn)}
+#saveDot.cloud i{background:var(--yes)}
+#themeBtn svg{width:20px;height:20px}
+
+#app{flex:1;min-width:0;height:100%;position:relative}
+.view{display:none;height:100%}
+.view.on{display:block}
+
+/* code view */
+#v-code.on{display:grid;grid-template-columns:0 minmax(0,1fr) minmax(380px,40%);height:100%}
+#v-code.lib.on{grid-template-columns:320px minmax(0,1fr) minmax(380px,40%)}
+#queue{overflow:hidden;display:flex;flex-direction:column;background:var(--sheet);border-right:1px solid var(--rule);min-width:0}
+#v-code:not(.lib) #queue{visibility:hidden}
+.lhead{padding:14px 14px 10px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--rule)}
+.lhead .row{display:flex;gap:6px;align-items:center}
+.lhead h2{font:700 20px/1.2 var(--display);margin:0;flex:1}
+#libState{font-size:12.5px;color:var(--ink-2)}
+.seg{display:flex;background:var(--rule-2);border-radius:999px;padding:3px;gap:2px}
+.seg button{flex:1;border:none;background:transparent;border-radius:999px;padding:5px 8px;font-size:13px;color:var(--ink-2)}
+.seg button.on{background:var(--sheet);color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(35,31,32,.14)}
+#qSearch{width:100%}
+.lscroll{flex:1;overflow:auto}
+.fsec{padding:8px 8px 4px}
+.fsec .fhead{display:flex;align-items:center;gap:4px;padding:2px 6px 6px;font-size:13px;color:var(--ink-2)}
+.fsec .fhead b{flex:1;color:var(--ink)}
+.fsec .fhead button{padding:3px 7px;font-size:12.5px}
+.frow{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:0;cursor:pointer;font-size:14px}
+.frow:hover{background:var(--rule-2)}
+.frow.on{background:var(--pencil-wash);color:var(--pencil-text);font-weight:700;box-shadow:inset 3px 0 0 var(--pencil)}
+.frow .tw{width:12px;font-size:10px;color:var(--ink-3)}
+.frow .fn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .fc{font-size:12px;color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}
+.selbar{display:flex;gap:6px;align-items:center;padding:6px 14px;background:var(--pencil-wash);font-size:13px}
+.selbar span{flex:1}
+.qtop{display:flex;align-items:center;gap:6px;padding:10px 14px 6px;border-top:1px solid var(--rule)}
+.qtop .seg{flex:1}
+#qlist{padding:0 8px 16px}
+.qi{display:flex;gap:10px;align-items:flex-start;padding:8px 8px;border-radius:0;cursor:pointer}
+.qi:hover{background:var(--rule-2)}
+.qi.cur{background:var(--pencil-wash);box-shadow:inset 3px 0 0 var(--pencil)}
+.qi .t{font-size:14px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.qi .s{font-size:12px;color:var(--ink-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qi>div{min-width:0}
+.dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:5px;border:1.5px solid var(--ink-3)}
+.dot.done{background:var(--yes);border-color:var(--yes)}
+.dot.ex{background:var(--ink-3);border-color:var(--ink-3)}
+.qi .cb{flex:none;width:16px;height:16px;border:1.5px solid var(--ink-3);border-radius:4px;margin-top:2px;display:grid;place-items:center;color:var(--pencil-ink);font-size:11px}
+.qi .cb.on{background:var(--pencil);border-color:var(--pencil)}
+.qi.sel{background:var(--pencil-wash)}
+
+#pdfcol{display:flex;flex-direction:column;min-width:0;background:var(--desk)}
+.ptools{display:flex;align-items:center;gap:4px;padding:8px 12px;white-space:nowrap;overflow-x:auto}
+.ptools button{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;background:transparent;border-color:transparent;color:var(--ink-2)}
+.ptools button:hover{background:var(--sheet);color:var(--ink);border-color:var(--rule)}
+.ptools .seg{background:var(--rule)}
+.ptools .seg button{padding:4px 10px}
+.ptools .seg button.on{background:var(--sheet)}
+#rangeLbl{flex:1;min-width:40px;overflow:hidden;text-overflow:ellipsis;font-size:13px;color:var(--ink-2);padding:0 8px}
+#zLbl{font-size:12.5px;color:var(--ink-2);width:40px;text-align:center;font-variant-numeric:tabular-nums}
+#pages{flex:1;overflow:auto;padding:6px 20px 30px;display:flex;flex-direction:column;align-items:center;gap:14px}
+#pages canvas{background:#fff;box-shadow:0 1px 2px rgba(35,31,32,.08),var(--shadow);max-width:none}
+#pages .plabel{font-size:12px;color:var(--ink-3);margin-top:-8px}
+#textview{flex:1;overflow:auto;display:none;padding:6px 20px 30px}
+#textview .paper{max-width:680px;margin:0 auto;background:var(--sheet);padding:44px 52px;box-shadow:var(--shadow);font:17px/1.68 var(--read);white-space:pre-wrap}
+#textview mark{background:var(--mark);color:inherit;padding:0 1px;border-radius:2px}
+.drop{margin:auto;max-width:460px;text-align:center;padding:42px 36px;border:1.5px dashed var(--ink-3);border-radius:12px;background:var(--sheet);color:var(--ink-2)}
+.drop h2{font:700 24px/1.25 var(--display);color:var(--ink);margin:0 0 8px;text-wrap:balance}
+.drop p{margin:0 0 18px}
+.drop .row{display:flex;gap:8px;justify-content:center}
+body.dragging .drop,body.dragging #pages{outline:3px dashed var(--pencil);outline-offset:-10px}
+.status{margin:auto;color:var(--ink-2)}
+
+/* coding sheet */
+#form{display:flex;flex-direction:column;background:var(--sheet);border-left:1px solid var(--rule);min-width:0}
+.shead{padding:16px 20px 12px;border-bottom:1px solid var(--rule)}
+.prog{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.prog b{color:var(--ink)}
+.bar{flex:1;height:5px;background:var(--rule-2);border-radius:3px;overflow:hidden;max-width:180px}
+.bar>i{display:block;height:100%;background:var(--pencil);border-radius:3px}
+.atitle{font:700 22px/1.25 var(--display);margin:12px 0 4px;text-wrap:balance;letter-spacing:-.01em}
+.ameta{font-size:14px;color:var(--ink-2);display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+.metaedit{display:grid;grid-template-columns:76px 1fr;gap:8px 10px;align-items:center;margin-top:12px;font-size:14px}
+.metaedit label{color:var(--ink-2)}
+.metaedit input{width:100%;padding:5px 8px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chips button{padding:4px 11px;font-size:13px;border-radius:999px}
+.chips button.on{background:var(--pencil);border-color:var(--pencil);color:var(--pencil-ink)}
+.note{margin:12px 20px 0;padding:9px 12px;font-size:13.5px;border-left:3px solid currentColor}
+.note.info{background:var(--pencil-wash);color:var(--pencil-text)}
+.note.ok{background:var(--yes-wash);color:var(--yes)}
+.note.warn{background:var(--warn-wash);color:var(--warn)}
+#formbody{flex:1;overflow:auto;padding-bottom:20px}
+.qrow{display:grid;grid-template-columns:30px minmax(0,1fr) auto;column-gap:10px;row-gap:8px;align-items:center;padding:12px 20px 12px 14px;border-bottom:1px solid var(--rule-2);border-left:3px solid transparent;cursor:pointer}
+.qrow.act{border-left-color:var(--pencil);background:linear-gradient(90deg,var(--pencil-wash),transparent 70%)}
+.qrow .qn{font-size:13px;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums;align-self:start;padding-top:2px}
+.qrow.miss .qn{color:var(--warn);font-weight:700}
+.qrow .ql{font-size:15px;line-height:1.35}
+.qrow.done .ql{color:var(--ink-2)}
+.qrow .qh{grid-column:2/4;font-size:13px;color:var(--ink-2);display:none;line-height:1.45}
+.qrow.act .qh{display:block}
+.qrow .qh code{font-size:11.5px}
+.qrow .wide{grid-column:2/4}
+.yn{display:flex;border:1px solid var(--rule);border-radius:var(--r);overflow:hidden;background:var(--sheet)}
+.yn button{border:none;border-radius:0;padding:6px 14px;font-size:14px;background:transparent;min-width:60px}
+.yn button+button{border-left:1px solid var(--rule)}
+.yn button.y.sel{background:var(--pencil);color:var(--pencil-ink);font-weight:700}
+.yn button.n.sel{background:var(--no-fill);color:var(--no-ink);font-weight:700}
+.opts{display:flex;flex-wrap:wrap;gap:6px}
+.opts button{padding:6px 13px;font-size:14px;border-radius:999px}
+.opts button.sel{background:var(--pencil);border-color:var(--pencil);color:var(--pencil-ink)}
+.k{font-size:11px;color:var(--ink-3);margin-right:5px}
+.sel .k{color:inherit;opacity:.75}
+.qrow input[type=number]{width:120px}
+.qrow textarea{min-height:56px}
+.sfoot{border-top:1px solid var(--rule);padding:12px 20px;display:flex;gap:8px;align-items:center}
+.sfoot .primary{flex:1;padding:11px 14px;font-size:15px;display:flex;justify-content:center;gap:10px;align-items:center}
+.sfoot .primary .kbd{background:transparent;color:inherit;border-color:currentColor;opacity:.7}
+#formMsg{padding:0 20px 10px;font-size:13px;color:var(--warn);display:none}
+#formMsg.on{display:block}
+
+/* other views */
+.page{height:100%;overflow:auto;padding:36px 40px 80px}
+.page>div{max-width:820px}
+.page h1{font:700 clamp(30px,4vw,40px)/1.15 var(--display);margin:0 0 10px;letter-spacing:-.02em;text-wrap:balance}
+.page .lede{color:var(--ink-2);margin:0 0 26px;max-width:62ch}
+.page section{border-top:1px solid var(--rule);padding:22px 0 26px}
+.page h2{font:700 20px/1.3 var(--display);margin:0 0 6px}
+.page section>p{color:var(--ink-2);margin:0 0 14px;max-width:62ch;font-size:14px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.vrow{display:grid;grid-template-columns:24px 170px minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:12px 0;border-bottom:1px solid var(--rule-2)}
+.vrow .num{color:var(--ink-3);font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+.vrow input{width:100%}
+.vrow .opttext,.vrow .helptext{grid-column:3/6}
+.vrow .seg button{padding:4px 9px;font-size:12.5px}
+.vrow .tools{display:flex}
+.vrow .tools button{padding:4px 7px}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--rule-2);vertical-align:top}
+th{font-size:13px;color:var(--ink-2);font-weight:400;border-bottom-color:var(--rule)}
+td.bad{color:var(--pencil-text);font-weight:700}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid2 label{display:flex;flex-direction:column;gap:5px;font-size:14px;color:var(--ink-2)}
+.exp{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.exp button{text-align:left;padding:16px;display:flex;flex-direction:column;gap:4px;border-radius:12px;background:var(--sheet)}
+.exp button.primary{background:var(--pencil)}
+.exp button b{font-size:15px}
+.exp button span{font-size:13px;color:var(--ink-2);line-height:1.35;font-weight:400;letter-spacing:0}
+.exp button.primary span{color:inherit;opacity:.85}
+
+#toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,8px);background:var(--ink);color:var(--sheet);padding:9px 16px;border-radius:var(--r);font-size:14px;opacity:0;transition:opacity .15s,transform .15s;pointer-events:none;z-index:60}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+#modal{position:fixed;inset:0;background:rgba(35,31,32,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+#modal.on{display:flex}
+#modal .box{background:var(--sheet);border-radius:12px;border:1px solid var(--rule);padding:22px 24px;max-width:460px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+#modal h3{font:700 21px/1.3 var(--display);margin:0 0 8px}
+#modal p{margin:0 0 10px}
+#modal .btnrow{justify-content:flex-end;margin-top:16px}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:14px;align-items:center}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+@media (max-width:1100px){
+  #v-code.lib.on{grid-template-columns:0 minmax(0,1fr) minmax(360px,44%)}
+  #v-code.lib #queue{visibility:visible;position:absolute;top:0;bottom:0;left:0;width:320px;max-width:85%;z-index:30;box-shadow:8px 0 30px rgba(35,31,32,.2)}
+}
+@media (max-width:760px){
+  body{flex-direction:column-reverse}
+  #rail{width:100%;flex-direction:row;justify-content:space-around;padding:4px 0;border-right:none;border-top:1px solid var(--rule)}
+  #rail .logo,#rail .spacer,#saveDot span,#themeLbl{display:none}
+  #rail button{width:auto;flex:1;font-size:11px}
+  #v-code.on,#v-code.lib.on{grid-template-columns:1fr;grid-template-rows:minmax(0,52%) minmax(0,48%)}
+  #form{border-left:none;border-top:1px solid var(--rule)}
+  .shead{padding:10px 14px 8px}.atitle{font-size:16px;margin-top:6px}
+  .qrow{padding:10px 14px 10px 8px}
+  .page{padding:22px 16px 60px}
+  .vrow{grid-template-columns:1fr}.vrow .opttext,.vrow .helptext{grid-column:1}.vrow .num{text-align:left}
+  .grid2{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<nav id="rail" aria-label="Sections">
+  <div class="logo"><svg viewBox="0 0 26 26" aria-hidden="true"><rect x="2" y="2" width="22" height="22" fill="var(--pencil)"/><path d="M8 13.5l3.4 3.4L18.5 9.5" stroke="var(--pencil-ink)" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Chota</div>
+  <button data-v="code" class="on"><svg class="i" viewBox="0 0 24 24"><path d="M4 5h9M4 10h9M4 15h6"/><path d="M14 17.5l2 2 4-4.5"/></svg>Code</button>
+  <button id="railLib"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Library</button>
+  <button data-v="codebook"><svg class="i" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Codebook</button>
+  <button data-v="recode"><svg class="i" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15"/><path d="M4 20v-5h5"/></svg>Reliability</button>
+  <button data-v="export"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19h14"/></svg>Export</button>
+  <button data-v="settings"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
+  <div class="spacer"></div>
+  <button id="themeBtn" title="Switch light and dark mode" aria-label="Switch light and dark mode"><svg class="i" viewBox="0 0 24 24" id="themeIcon"></svg><span id="themeLbl">Dark</span></button>
+  <div id="saveDot" title=""><i></i><span id="store">Starting</span></div>
+</nav>
+
+<div id="app">
+<section id="v-code" class="view on">
+  <aside id="queue" aria-label="Library">
+    <div class="lhead">
+      <div class="row"><h2>Library</h2><button class="quiet" id="btnCloseQ" title="Close library (Esc)" aria-label="Close library"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="row"><button class="primary" id="btnLoad" style="flex:1">Add PDFs</button><button id="btnLoadDir" title="Add every PDF in a folder on your computer">Add a folder</button></div>
+      <input type="file" id="fileIn" accept="application/pdf,.pdf" multiple hidden>
+      <input type="file" id="dirIn" webkitdirectory multiple hidden>
+      <div id="libState"></div>
+    </div>
+    <div class="lscroll">
+      <div class="fsec">
+        <div class="fhead"><b>Folders</b><button class="quiet" id="btnNewFolder">New</button><button class="quiet" id="btnAutoSort">Auto-sort</button><button class="quiet" id="btnDelFolder" style="display:none">Delete</button></div>
+        <div id="folders"></div>
+      </div>
+      <div class="qtop">
+        <div class="seg" id="qFilter"><button data-f="todo" class="on">To code</button><button data-f="done">Coded</button><button data-f="all">All</button></div>
+        <button class="quiet" id="btnSelect" title="Select PDFs to move or remove">Select</button>
+      </div>
+      <div class="selbar" id="selBar" style="display:none"><span id="selCount"></span><button id="btnMoveSel">Move to…</button><button id="btnRemoveSel">Remove</button></div>
+      <div style="padding:4px 14px 8px"><input id="qSearch" placeholder="Search headlines and file names"></div>
+      <div id="scanState" class="small muted" style="padding:0 16px"></div>
+      <div id="qlist"></div>
+    </div>
+  </aside>
+
+  <div id="pdfcol">
+    <div class="ptools">
+      <button id="btnQueue" title="Library (L)"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <button id="btnPrev" title="Previous article ( [ )" aria-label="Previous article"><svg class="i" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button id="btnNext" title="Next article ( ] )" aria-label="Next article"><svg class="i" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+      <span id="rangeLbl"></span>
+      <div class="seg" id="viewSeg"><button data-m="page" class="on">Page</button><button data-m="text" title="Plain text with your highlight words marked">Text</button></div>
+      <button id="zOut" title="Zoom out" aria-label="Zoom out"><svg class="i" viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><span id="zLbl">100%</span><button id="zIn" title="Zoom in" aria-label="Zoom in"><svg class="i" viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
+      <button id="btnSplit" title="Split this article in two"><svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.5"/><circle cx="6" cy="17" r="2.5"/><path d="M8 8.5L20 16M8 15.5L20 8"/></svg></button>
+      <button id="btnMerge" title="Join the next article into this one"><svg class="i" viewBox="0 0 24 24"><path d="M6 4v5a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v5"/><path d="M18 4v5a3 3 0 0 1-3 3"/></svg></button>
+    </div>
+    <div id="pages"><div class="drop"><h2>Drop your article PDFs here</h2><p>One PDF per article or Nexis batch files. Chota splits batches into articles and keeps every PDF in your library.</p><div class="row"><button class="primary" onclick="document.getElementById('fileIn').click()">Choose PDFs</button><button onclick="document.getElementById('dirIn').click()">Choose a folder</button></div></div></div>
+    <div id="textview"></div>
+  </div>
+
+  <div id="form">
+    <div class="shead">
+      <div class="prog"><span id="progText"></span><span class="bar"><i id="progBar"></i></span><span id="paceText"></span></div>
+      <div id="ahead"></div>
+    </div>
+    <div id="notes"></div>
+    <div id="formbody"></div>
+    <div id="formMsg"></div>
+    <div class="sfoot">
+      <button class="primary" id="btnSave" disabled>Save and next <span class="kbd">Enter</span></button>
+      <button id="btnExclude" disabled title="Not about AI, a duplicate, or cannot be coded">Exclude</button>
+      <button class="quiet" id="btnClear" disabled title="Clear answers">Clear</button>
+      <button class="quiet" id="btnKeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+    </div>
+  </div>
+</section>
+
+<section id="v-codebook" class="view"><div class="page"><div>
+  <h1>Codebook</h1>
+  <p class="lede">Each variable is one question per article and one column in your data. Outlet, country, date, headline and pages are recorded for you, so leave them out.</p>
+  <section>
+    <div class="btnrow" style="justify-content:space-between"><h2 style="margin:0">Questions</h2><div class="btnrow"><button id="loadExample">Load example questions</button><button class="primary" id="addVar">Add a question</button></div></div>
+    <div id="vlist"></div>
+  </section>
+  <section>
+    <h2>Paste a codebook</h2>
+    <p>One question per line as <code>name | question | type | coding rule</code>. Types are <code>binary</code> (Yes 1, No 0), <code>single: 1=Market; 2=Governance</code>, <code>number</code> or <code>text</code>. Pasting replaces the list above.</p>
+    <textarea id="bulkCb" rows="7" placeholder="market | Is AI presented as a market? | binary | Products, investment, jobs, revenue
+dominant | Which orientation gets the most space? | single: 1=Market; 2=Governance; 3=Capability; 4=None
+notes | Notes | text"></textarea>
+    <div class="btnrow" style="margin-top:10px"><button class="primary" id="applyBulk">Replace codebook</button><button id="cbToText">Copy current codebook here</button></div>
+  </section>
+</div></div></section>
+
+<section id="v-recode" class="view"><div class="page"><div>
+  <h1>Reliability</h1>
+  <p class="lede">With one coder, reliability comes from coding a random subsample twice. Wait about a week, recode the sample without seeing your first codes, and report Krippendorff's alpha for each variable. An alpha of .80 or higher is the usual benchmark, and .667 is the floor for tentative conclusions.</p>
+  <section>
+    <h2>Sample</h2>
+    <div class="btnrow"><label class="small muted">Sample <input type="number" id="sampPct" value="10" min="1" max="100" style="width:64px"> % of coded articles</label><button id="drawSample">Draw a random sample</button><button class="primary" id="startRecode" disabled>Start recoding</button><button id="stopRecode" style="display:none">Back to normal coding</button></div>
+    <p id="sampInfo" class="small" style="margin-top:12px"></p>
+  </section>
+  <section>
+    <div class="btnrow" style="justify-content:space-between"><h2 style="margin:0">Results</h2><button id="dlRel" disabled>Download results as CSV</button></div>
+    <div id="relTable" class="small muted" style="margin-top:10px">Results appear once some sample articles are recoded.</div>
+  </section>
+</div></div></section>
+
+<section id="v-export" class="view"><div class="page"><div>
+  <h1>Export</h1>
+  <p class="lede" id="expInfo"></p>
+  <section>
+    <h2>Data for analysis</h2>
+    <div class="exp">
+      <button class="primary" data-exp="sav"><b>SPSS</b><span>.sav with variable and value labels, in a .zip</span></button>
+      <button data-exp="xlsx"><b>Excel</b><span>Codes plus a codebook sheet</span></button>
+      <button data-exp="csv"><b>CSV</b><span>Plain table of numeric codes</span></button>
+      <button data-exp="r"><b>R and Python</b><span>CSV with scripts that load it with labels</span></button>
+    </div>
+    <label class="small muted" style="display:flex;gap:8px;align-items:center;margin-top:14px"><input type="checkbox" id="expEx"> Leave out excluded articles</label>
+  </section>
+  <section>
+    <h2>Backup</h2>
+    <p>Codes, codebook, folders, settings and recodes in one file. Download one at the end of each coding day.</p>
+    <div class="btnrow"><button data-exp="backup">Download backup</button><button id="btnRestore">Restore from a backup</button><input type="file" id="restoreIn" accept=".json,application/json" hidden></div>
+  </section>
+  <section id="copyCard" style="display:none">
+    <h2>Copy the CSV</h2>
+    <p>Downloads are not available in this view. Copy the text below into a file ending in .csv.</p>
+    <textarea id="copyArea" rows="8"></textarea>
+  </section>
+</div></div></section>
+
+<section id="v-settings" class="view"><div class="page"><div>
+  <h1>Settings</h1>
+  <p class="lede">Your target and deadline drive the daily pace shown above the coding sheet.</p>
+  <section>
+    <div class="grid2"><label for="setTarget">Articles to code<input type="number" id="setTarget" min="1"></label><label for="setDeadline">Finish by<input type="date" id="setDeadline"></label></div>
+  </section>
+  <section>
+    <h2>Outlets</h2>
+    <p>One per line as <code>Outlet name = Country</code>. Chota looks for these names on each article's first page. The order sets the numeric codes, so the first outlet is 1.</p>
+    <textarea id="setOutlets" rows="10"></textarea>
+  </section>
+  <section>
+    <h2>Highlight words</h2>
+    <p>Marked in the text view. Separate them with commas.</p>
+    <input id="setHl" style="width:100%">
+  </section>
+  <section>
+    <h2>Appearance</h2>
+    <div class="seg" id="themeSeg" style="max-width:320px"><button data-t="">Match system</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+  </section>
+  <div class="btnrow"><button class="primary" id="saveSettings">Save settings</button></div>
+</div></div></section>
+</div>
+
+<div id="modal" role="dialog" aria-modal="true"><div class="box"><div id="mBody"></div><div class="btnrow"><button id="mCancel">Cancel</button><button class="primary" id="mOk">OK</button></div></div></div>
+<div id="toast" role="status"></div>
+<script>
+/*LIB*/
+</script>
+<script>
+/*MAIN*/
+</script>
+</body>
+</html>
