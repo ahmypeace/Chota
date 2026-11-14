@@ -2,8 +2,9 @@
 from pathlib import Path
 
 src = Path(__file__).parent / "src"
-lib = (src / "lib.js").read_text().replace(
+read = lambda name: (src / name).read_text(encoding="utf-8")
+lib = read("lib.js").replace(
     "if (typeof module !== 'undefined') module.exports = { writeSav, kAlphaNominal };", "")
-html = (src / "shell.html").read_text().replace("/*LIB*/", lib).replace("/*MAIN*/", (src / "main.js").read_text())
-(Path(__file__).parent / "index.html").write_text(html)
+html = read("shell.html").replace("/*LIB*/", lib).replace("/*MAIN*/", read("main.js"))
+(Path(__file__).parent / "index.html").write_text(html, encoding="utf-8", newline="\n")
 print("index.html written")

@@ -31,7 +31,8 @@ const dayOf = (ts) => { const d = new Date(ts); return d.getFullYear() + '-' + S
 /* ---------- defaults ---------- */
 const OLD_STARTER = ['market', 'governance', 'capability', 'dominant', 'notes'];
 const yesno = (name, label, help) => ({ name, label, type: 'binary', help });
-const DEFAULT_CODEBOOK = { vars: [
+// New users start with an empty codebook; these questions are what "Load example questions" puts in
+const EXAMPLE_CODEBOOK = { vars: [
   yesno('ai_central', 'Is AI the main subject of the article?', 'Yes if AI is the focus of the headline, the lead, or most of the text. No if AI only comes up in passing.'),
   yesno('market', 'Is AI presented as a market?', 'AI as something bought, sold, invested in or profited from: products, startups, deals, investment, revenue, jobs created, consumer use.'),
   yesno('governance', 'Is AI presented as something to govern?', 'AI as something to regulate, legislate, set policy or strategy for, or oversee for risks: laws, bills, national AI strategies, ethics guidelines, data protection, regulators.'),
@@ -49,24 +50,35 @@ const DEFAULT_CODEBOOK = { vars: [
   { name: 'genre', label: 'Type of article', type: 'single', options: [{ code: 1, label: 'Hard news' }, { code: 2, label: 'Feature or analysis' }, { code: 3, label: 'Opinion or editorial' }, { code: 4, label: 'Interview' }, { code: 5, label: 'Press release or sponsored' }], help: '' },
   { name: 'notes', label: 'Notes', type: 'text', help: 'Anything odd about this article, or a quote worth keeping.' },
 ] };
-const DEFAULT_SETTINGS = {
+const DEFAULT_CODEBOOK = { vars: [] };
+const DEFAULT_SETTINGS = { target: 0, deadline: '', hl: '', outlets: '' };
+// Browsers used before the defaults went blank keep the project they were set up with
+const LEGACY_SETTINGS = {
   target: 940, deadline: '2026-11-25', hl: 'AI, artificial intelligence, ChatGPT, generative, algorithm, machine learning, regulation, policy',
-  outlets: ['Daily Guide = Ghana', 'The Herald = Ghana', 'Punch = Nigeria', 'The Nation = Nigeria', 'The Standard = Kenya', 'The Star = Kenya', 'Daily Monitor = Uganda', 'The Observer = Uganda', 'Hindustan Times = India', 'Times of India = India', 'Dawn = Pakistan', 'The News International = Pakistan', 'New Straits Times = Malaysia', 'Malay Mail = Malaysia', 'Philippine Daily Inquirer = Philippines', 'Philippine Star = Philippines'].join('\n'),
+  outlets:['Daily Guide = Ghana', 'The Herald = Ghana', 'Punch = Nigeria', 'The Nation = Nigeria', 'The Standard = Kenya', 'The Star = Kenya', 'Daily Monitor = Uganda', 'The Observer = Uganda', 'Hindustan Times = India', 'Times of India = India', 'Dawn = Pakistan', 'The News International = Pakistan', 'New Straits Times = Malaysia', 'Malay Mail = Malaysia', 'Philippine Daily Inquirer = Philippines', 'Philippine Star = Philippines'].join('\n'),
 };
 
 /* ---------- state ---------- */
+// A browser holding Chota data but no version mark was set up when the AI project was the default
+const LEGACY = lsGet('cc_v', 0) < 2 && ['cc_records', 'cc_codebook', 'cc_settings', 'cc_folders', 'cc_lib'].some((k) => lsGet(k, null) !== null);
 const S = {
-  codebook: (() => { const c = lsGet('cc_codebook', null); return c && JSON.stringify(c.vars.map((v) => v.name)) !== JSON.stringify(OLD_STARTER) ? c : JSON.parse(JSON.stringify(DEFAULT_CODEBOOK)); })(),
-  settings: Object.assign({}, DEFAULT_SETTINGS, lsGet('cc_settings', {})),
+  codebook: (() => {
+    const c = lsGet('cc_codebook', null);
+    if (c && Array.isArray(c.vars) && JSON.stringify(c.vars.map((v) => v.name)) !== JSON.stringify(OLD_STARTER)) return c;
+    return JSON.parse(JSON.stringify(c || LEGACY ? EXAMPLE_CODEBOOK : DEFAULT_CODEBOOK));
+  })(),
+  settings: Object.assign({}, LEGACY ? LEGACY_SETTINGS : DEFAULT_SETTINGS, lsGet('cc_settings', {})),
   records: lsGet('cc_records', {}),
   recodes: lsGet('cc_recodes', {}),
   sample: lsGet('cc_sample', null),
   files: [], articles: [], cur: -1,
   mode: 'code', form: {}, meta: {}, activeQ: 0, confirmMissing: false, openedAt: 0,
   zoom: 1, textMode: false, view: 'code', qFilter: 'todo', showOutlets: false,
-  folders: lsGet('cc_folders', []), folderSel: '', openFolders: new Set(), selecting: false, selected: new Set(), assets: null, libFull: false,
-  db: null, uid: null, dl: null, cloud: false,
+  folders: lsGet('cc_folders', []), folderSel: '', openFolders: new Set(), selecting: false, selected: new Set(), libFull: false,
+  dl: null, dir: null, pendingDir: null, dirError: false, hidden: new Set(),
 };
+if (LEGACY) { lsSet('cc_codebook', S.codebook); lsSet('cc_settings', S.settings); }
+lsSet('cc_v', 2);
 
 /* ---------- outlets ---------- */
 function outletList() {
@@ -74,84 +86,224 @@ function outletList() {
 }
 function countryList() { const out = []; for (const o of outletList()) if (o.country && !out.includes(o.country)) out.push(o.country); return out; }
 
-/* ---------- storage (cloud + local) ---------- */
-let writeChain = Promise.resolve();
-function cloudWrite(fn) {
-  writeChain = writeChain.then(async () => {
-    if (!S.cloud) return;
-    for (let i = 0; i < 2; i++) {
-      try { await fn(); return; } catch (e) {
-        if (e && e.code === 'unavailable' && i === 0) { await sleep(400 + Math.random() * 600); continue; }
-        console.warn('cloud write failed', e); setStore(false, 'Cloud save failed. Kept in this browser; download a backup.'); return;
-      }
+/* ---------- storage ----------
+   Codes always go to this browser's localStorage. On top of that, one of two places keeps everything:
+   - a folder on the computer (Chrome and Edge): PDFs are read from it and a codes file is written to it
+   - otherwise this browser's IndexedDB, which also keeps the PDFs between visits */
+const BACKUP_DIR = 'chota-backups';
+const canUseFolder = 'showDirectoryPicker' in window;
+const idb = (() => {
+  let p;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open('chota', 1);
+    r.onupgradeneeded = () => { const db = r.result; for (const s of ['kv', 'pdfs', 'files']) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s); };
+    r.onsuccess = () => res(r.result); r.onerror = () => { p = null; rej(r.error); };
+  }));
+  const tx = async (store, mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction(store, mode); const req = fn(t.objectStore(store));
+      t.oncomplete = () => res(req.result); t.onerror = t.onabort = () => rej(t.error);
+    });
+  };
+  return {
+    get: (st, k) => tx(st, 'readonly', (s) => s.get(k)),
+    all: (st) => tx(st, 'readonly', (s) => s.getAll()),
+    put: (st, k, v) => tx(st, 'readwrite', (s) => s.put(v, k)),
+    del: (st, k) => tx(st, 'readwrite', (s) => s.delete(k)),
+  };
+})();
+
+function persistRecord() { lsSet('cc_records', S.records); queueSave(); }
+function deleteRecord(key) { delete S.records[key]; lsSet('cc_records', S.records); queueSave(); }
+function persistRecode() { lsSet('cc_recodes', S.recodes); queueSave(); }
+function persistCodebook() { lsSet('cc_codebook', S.codebook); queueSave(); }
+function persistSettings() { lsSet('cc_settings', S.settings); queueSave(); }
+function persistSample() { lsSet('cc_sample', S.sample); queueSave(); }
+function saveAllLocal() { lsSet('cc_records', S.records); lsSet('cc_recodes', S.recodes); lsSet('cc_codebook', S.codebook); lsSet('cc_settings', S.settings); lsSet('cc_sample', S.sample); lsSet('cc_folders', S.folders); }
+
+function setStore(saving) {
+  let text, title, ok = false;
+  if (S.dirError) { text = 'Not saved'; title = 'Chota could not write to your folder. Click to reconnect it. Your codes are still kept in this browser.'; }
+  else if (S.dir) { ok = true; text = saving ? 'Saving' : 'Saved'; title = `Codes are saved to ${S.dir.name}/${S.dir.file} after every article. Click to open the library.`; }
+  else if (S.pendingDir) { text = 'Reconnect'; title = `Click to reopen your folder ${S.pendingDir.handle.name}.`; }
+  else { text = 'This browser'; title = 'Codes and PDFs are kept in this browser only. Download a backup from Export now and then, or choose a folder to save to in the Library.'; }
+  $('#saveDot').classList.toggle('cloud', ok); $('#store').textContent = text; $('#saveDot').title = title;
+  renderDirBar();
+}
+function renderDirBar() {
+  const b = $('#dirBar'); if (!b) return;
+  if (S.dir) b.innerHTML = `<span>Saving to <b>${esc(S.dir.name)}</b> / ${esc(S.dir.file)}</span><button class="quiet" id="dirBtn" title="Save to a different folder">Change</button>`;
+  else if (S.pendingDir) b.innerHTML = `<span>Your folder <b>${esc(S.pendingDir.handle.name)}</b> is not open</span><button class="primary" id="dirBtn">Reconnect</button>`;
+  else if (canUseFolder) b.innerHTML = `<span>Saved in this browser only</span><button id="dirBtn" title="Keep your PDFs and codes in a folder on this computer">Save to a folder…</button>`;
+  else b.innerHTML = '<span>Saved in this browser. To save to a folder on your computer instead, open Chota in Chrome or Edge.</span>';
+  const btn = $('#dirBtn'); if (btn) btn.onclick = () => (!S.dir && S.pendingDir ? reconnectDir() : chooseDir());
+}
+
+/* ----- the codes file in the folder ----- */
+const dataFileName = (coder) => { const s = (coder || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); return s ? `chota-codes-${s}.json` : 'chota-codes.json'; };
+function dataSnapshot() {
+  const files = {};
+  for (const f of S.files) files[f.id] = { name: f.name, path: f.path || '', size: f.size || 0, folder: f.folder || '', numPages: f.numPages || null, starts: f.starts, metaByStart: f.metaByStart || {}, addedAt: f.addedAt || 0 };
+  return { app: 'chota', version: 1, coder: S.dir?.coder || '', exportedAt: new Date().toISOString(), codebook: S.codebook, settings: S.settings, records: S.records, recodes: S.recodes, sample: S.sample, folders: S.folders, fileSplits: S.fileSplits || {}, hidden: [...S.hidden], files };
+}
+async function writeText(dir, parts, data) {
+  let d = dir;
+  for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
+  const fh = await d.getFileHandle(parts[parts.length - 1], { create: true });
+  const w = await fh.createWritable();
+  try { await w.write(data); await w.close(); } catch (e) { try { await w.abort(); } catch {} throw e; }
+  return fh;
+}
+let dirTimer = null, dirDirty = false, dirChain = Promise.resolve();
+function queueSave() {
+  if (!S.dir) return;
+  dirDirty = true; setStore(true);
+  clearTimeout(dirTimer); dirTimer = setTimeout(flushDir, 500);
+}
+function flushDir() {
+  clearTimeout(dirTimer);
+  dirChain = dirChain.then(async () => {
+    if (!dirDirty || !S.dir) return;
+    dirDirty = false;
+    const d = S.dir;
+    try { await writeText(d.handle, [d.file], JSON.stringify(dataSnapshot(), null, 1)); if (S.dir === d) setStore(false); }
+    catch (e) {
+      console.warn('folder save failed', e);
+      if (S.dir !== d) return;
+      S.pendingDir = { handle: d.handle, coder: d.coder }; S.dir = null; S.dirError = true; setStore();
+      toast('Chota could not save to your folder. Click Reconnect in the library. Your codes are still kept in this browser.', 7000);
     }
   });
-  return writeChain;
+  return dirChain;
 }
-const ud = (p) => S.db.doc(`data/users/${S.uid}/${p}`);
-const codesCol = () => ud('project').collection('codes');
-const recodesCol = () => ud('project').collection('recodes');
-function persistRecord(r) { lsSet('cc_records', S.records); cloudWrite(() => codesCol().doc(safeSeg(r.key)).set(r)); }
-function deleteRecord(key) { delete S.records[key]; lsSet('cc_records', S.records); cloudWrite(() => codesCol().doc(safeSeg(key)).delete()); }
-function persistRecode(r) { lsSet('cc_recodes', S.recodes); cloudWrite(() => recodesCol().doc(safeSeg(r.key)).set(r)); }
-function persistCodebook() { lsSet('cc_codebook', S.codebook); cloudWrite(() => ud('codebook').set(JSON.parse(JSON.stringify(S.codebook)))); }
-function persistSettings() { lsSet('cc_settings', S.settings); cloudWrite(() => ud('settings').set({ ...S.settings })); }
-function persistSample() { lsSet('cc_sample', S.sample); cloudWrite(() => S.sample ? ud('recodesample').set(S.sample) : ud('recodesample').delete()); }
 
-function setStore(cloud, title) {
-  $('#saveDot').classList.toggle('cloud', !!cloud);
-  $('#store').textContent = cloud ? 'Saved' : 'This browser only';
-  $('#saveDot').title = title || (cloud ? 'Every article you save is stored with your account.' : 'Codes are kept in this browser only. Download a backup from Export at the end of each day.');
-}
-async function loadAll(col, kf = 'key') {
-  const out = {};
-  const a = await col.orderBy('savedAt', 'asc').limit(1000).get();
-  for (const d of a.docs) { const x = d.data(); if (x && x[kf]) out[x[kf]] = x; }
-  if (a.size >= 1000) { const b = await col.orderBy('savedAt', 'desc').limit(1000).get(); for (const d of b.docs) { const x = d.data(); if (x && x[kf]) out[x[kf]] = x; } }
-  return out;
-}
-async function initCloud() {
-  setStore(false, 'Connecting to your account'); $('#store').textContent = 'Connecting';
-  try {
-    const [db, user] = await Promise.all([null, null]);
-    S.dl = await null;
-    S.assets = await null;
-    if (!db || !user) { setStore(false); return; }
-    const uid = await user.id();
-    if (!uid) { setStore(false); return; }
-    S.db = db; S.uid = uid;
-    const timeout = sleep(12000).then(() => { throw new Error('timeout'); });
-    const load = (async () => {
-      const [cb, st, sm, recs, rcs, lib, fo] = await Promise.all([ud('codebook').get(), ud('settings').get(), ud('recodesample').get(), loadAll(codesCol()), loadAll(recodesCol()), loadAll(libCol(), 'id'), ud('folders').get()]);
-      return { cb, st, sm, recs, rcs, lib, fo };
-    })();
-    const { cb, st, sm, recs, rcs, lib, fo } = await Promise.race([load, timeout]);
-    S.cloud = true;
-    // merge: newer savedAt wins; push local-only items up
-    const pushRec = [], pushRc = [];
-    for (const [k, r] of Object.entries(recs)) if (!S.records[k] || (S.records[k].savedAt || 0) < (r.savedAt || 0)) S.records[k] = r;
-    for (const [k, r] of Object.entries(S.records)) if (!recs[k] || (recs[k].savedAt || 0) < (r.savedAt || 0)) pushRec.push(r);
-    for (const [k, r] of Object.entries(rcs)) if (!S.recodes[k] || (S.recodes[k].savedAt || 0) < (r.savedAt || 0)) S.recodes[k] = r;
-    for (const [k, r] of Object.entries(S.recodes)) if (!rcs[k] || (rcs[k].savedAt || 0) < (r.savedAt || 0)) pushRc.push(r);
-    if (cb.exists && Array.isArray(cb.data().vars)) S.codebook = JSON.parse(JSON.stringify(cb.data())); else persistCodebook();
-    if (JSON.stringify(S.codebook.vars.map((v) => v.name)) === JSON.stringify(OLD_STARTER)) { S.codebook = JSON.parse(JSON.stringify(DEFAULT_CODEBOOK)); persistCodebook(); }
-    if (fo.exists && Array.isArray(fo.data().list)) { S.folders = [...new Set([...fo.data().list, ...S.folders])]; lsSet('cc_folders', S.folders); }
-    for (const d of Object.values(lib)) {
-      if (S.files.some((f) => f.id === d.id)) { const f = S.files.find((x) => x.id === d.id); if (!f.assetId) { f.assetId = d.assetId; f.folder = f.folder || d.folder; } continue; }
-      S.files.push({ id: d.id, name: d.name, size: d.size, assetId: d.assetId, folder: d.folder || '', addedAt: d.addedAt, numPages: d.numPages, starts: (d.starts && d.starts.length ? d.starts.slice() : [1]), metaByStart: JSON.parse(JSON.stringify(d.metaByStart || {})), scanned: !!d.numPages, pages: null });
-    }
-    sortFiles();
-    if (st.exists) S.settings = Object.assign({}, DEFAULT_SETTINGS, st.data()); else persistSettings();
-    if (sm.exists) S.sample = JSON.parse(JSON.stringify(sm.data())); else if (S.sample) persistSample();
-    lsSet('cc_records', S.records); lsSet('cc_recodes', S.recodes); lsSet('cc_codebook', S.codebook); lsSet('cc_settings', S.settings);
-    for (const r of pushRec) cloudWrite(() => codesCol().doc(safeSeg(r.key)).set(r));
-    for (const r of pushRc) cloudWrite(() => recodesCol().doc(safeSeg(r.key)).set(r));
-    setStore(true);
-    refreshAll(); renderFolders(); libState(); uploadQueue();
-    if (S.cur < 0 && S.files.length) goNext(-1);
-  } catch (e) {
-    console.warn('cloud init', e); S.cloud = false; setStore(false);
+/* ----- opening a folder ----- */
+async function walkDir(dir, rel, out) {
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind === 'directory') { if (!name.startsWith('.') && name !== BACKUP_DIR) await walkDir(h, rel ? rel + '/' + name : name, out); }
+    else if (/\.pdf$/i.test(name)) out.push({ handle: h, name, rel });
   }
+}
+function fileFromDoc(d) {
+  return { id: d.id, name: d.name, size: d.size || 0, path: d.path || '', folder: d.folder || '', addedAt: d.addedAt || 0, numPages: d.numPages || null, starts: d.starts && d.starts.length ? d.starts.slice() : [1], metaByStart: JSON.parse(JSON.stringify(d.metaByStart || {})), scanned: !!d.numPages, pages: null };
+}
+async function chooseDir() {
+  if (!canUseFolder) { toast('Saving to a folder works in Chrome and Edge.', 4000); return; }
+  let handle;
+  try { handle = await window.showDirectoryPicker({ id: 'chota', mode: 'readwrite' }); }
+  catch (e) { if (e?.name !== 'AbortError') toast('Could not open that folder: ' + (e?.message || e), 5000); return; }
+  let prev = S.dir || S.pendingDir; if (!prev) { try { prev = await idb.get('kv', 'dir'); } catch {} }
+  const ok = await ask(`<h3>Save to ${esc(handle.name)}</h3><p class="small">Chota opens the PDFs in this folder and its subfolders, and saves your codes in it after every article. PDFs you add later are copied into it.</p><label class="small" style="display:block">Your name or initials <span class="mute">(optional; gives you your own codes file if several people share this folder)</span><input id="coderIn" style="width:100%;margin-top:6px" value="${esc(prev?.coder || '')}"></label>`, 'Use this folder');
+  if (!ok) return;
+  const coder = (document.getElementById('coderIn').value || '').trim();
+  let same = false;
+  try { same = !!(prev?.handle && (await prev.handle.isSameEntry(handle)) && (prev.coder || '') === coder); } catch {}
+  if (S.dir) await flushDir();
+  await connectDir(handle, coder, same);
+}
+async function reconnectDir() {
+  const p = S.pendingDir; if (!p) return chooseDir();
+  let perm = 'denied';
+  try { perm = await p.handle.requestPermission({ mode: 'readwrite' }); } catch (e) { console.warn(e); }
+  if (perm !== 'granted') { toast('Chota needs your permission to open that folder.', 4000); return; }
+  await connectDir(p.handle, p.coder, true);
+}
+// same = this browser was last saving to this folder and codes file, so its newer codes are merged in without asking
+async function connectDir(handle, coder, same) {
+  const file = dataFileName(coder), today = todayStr();
+  $('#store').textContent = 'Opening';
+  try {
+    let raw = null, data = null;
+    try { raw = await (await (await handle.getFileHandle(file)).getFile()).text(); } catch (e) { if (e?.name !== 'NotFoundError') throw e; }
+    if (raw != null) {
+      try { data = JSON.parse(raw); if (!data || typeof data !== 'object') throw 0; }
+      catch { await ask(`<h3>${esc(file)} could not be read</h3><p class="small">The codes file in ${esc(handle.name)} is damaged, so Chota has left it alone. Restore a copy from the ${BACKUP_DIR} folder, or choose another folder.</p>`, 'OK'); setStore(); return false; }
+      await writeText(handle, [BACKUP_DIR, file.replace(/\.json$/, `-${today}.json`)], raw);
+    }
+    const newer = (a, b) => !b || (a.savedAt || 0) > (b.savedAt || 0);
+    const fileRecs = data?.records || {}, fileRcs = data?.recodes || {};
+    const extraR = Object.entries(S.records).filter(([k, r]) => newer(r, fileRecs[k]));
+    const extraRc = Object.entries(S.recodes).filter(([k, r]) => newer(r, fileRcs[k]));
+    let take = true;
+    if (!same && (extraR.length || extraRc.length)) {
+      const n = extraR.length || extraRc.length;
+      take = await ask(data
+        ? `<h3>Add this browser's codes?</h3><p class="small">This browser has ${n} coded article${n === 1 ? '' : 's'} that ${n === 1 ? 'is' : 'are'} not in ${esc(file)}, or newer than the copy there. Add ${n === 1 ? 'it' : 'them'} to the file? Either way a copy of this browser's codes is put in ${BACKUP_DIR}.</p>`
+        : `<h3>Start with this browser's codes?</h3><p class="small">This browser has ${n} coded article${n === 1 ? '' : 's'}. Put ${n === 1 ? 'it' : 'them'} in your new codes file, or start empty? Either way a copy is put in ${BACKUP_DIR}.</p>`, data ? 'Add them' : 'Include them');
+      await writeText(handle, [BACKUP_DIR, `browser-codes-${today}.json`], JSON.stringify({ app: 'chota', version: 1, exportedAt: new Date().toISOString(), codebook: S.codebook, settings: S.settings, records: S.records, recodes: S.recodes, sample: S.sample, fileSplits: S.fileSplits || {} }, null, 1));
+    }
+    const recs = { ...fileRecs }, rcs = { ...fileRcs };
+    if (take) { for (const [k, r] of extraR) recs[k] = r; for (const [k, r] of extraRc) rcs[k] = r; }
+    if (data) {
+      if (data.codebook && Array.isArray(data.codebook.vars)) S.codebook = data.codebook;
+      if (data.settings) S.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings);
+      if ('sample' in data) S.sample = data.sample;
+      S.folders = Array.isArray(data.folders) ? data.folders : [];
+      S.fileSplits = data.fileSplits || {};
+      S.hidden = new Set(data.hidden || []);
+    } else if (!take) { S.sample = null; S.hidden = new Set(); }
+    else S.hidden = new Set();
+    S.records = recs; S.recodes = rcs;
+
+    // PDFs in the folder
+    const found = []; await walkDir(handle, '', found);
+    const meta = data?.files || {}, byId = new Map(), list = [];
+    for (const it of found) {
+      const fo = await it.handle.getFile();
+      let id = safeSeg(it.name); const ex = byId.get(id);
+      if (ex) { if (ex.size === fo.size) continue; id = safeSeg(it.name.replace(/\.pdf$/i, '')) + '-' + fo.size + '.pdf'; if (byId.has(id)) continue; }
+      const path = it.rel ? it.rel + '/' + it.name : it.name;
+      const f = meta[id] ? fileFromDoc({ ...meta[id], id }) : { id, name: it.name, size: fo.size, folder: it.rel, addedAt: fo.lastModified || Date.now(), scanned: false, numPages: null, starts: [1], pages: null, metaByStart: {} };
+      Object.assign(f, { handle: it.handle, path, size: fo.size });
+      byId.set(id, f);
+      if (!S.hidden.has(id)) list.push(f);
+    }
+    // PDFs kept in this browser, or opened this visit, that the folder does not have yet
+    let bdocs = []; try { bdocs = await idb.all('files'); } catch {}
+    const toCopy = bdocs.filter((d) => !byId.has(d.id));
+    if (toCopy.length && await ask(`<h3>Copy PDFs into the folder?</h3><p class="small">${toCopy.length} PDF${toCopy.length === 1 ? ' is' : 's are'} saved in this browser but not in ${esc(handle.name)}. Copy ${toCopy.length === 1 ? 'it' : 'them'} into the folder? The browser's copies are then removed.</p>`, 'Copy them')) {
+      for (const d of toCopy) { let blob = null; try { blob = await idb.get('pdfs', d.id); } catch {} if (blob) { const f = fileFromDoc(d); f.file = blob; f.migrate = true; list.push(f); byId.set(f.id, f); S.hidden.delete(f.id); } }
+    }
+    for (const f of S.files) if (f.file && !f.handle && !f.stored && !byId.has(f.id)) { list.push(f); byId.set(f.id, f); }
+
+    S.dir = { handle, coder, file, name: handle.name }; S.pendingDir = null; S.dirError = false;
+    try { await idb.put('kv', 'dir', { handle, coder }); } catch (e) { console.warn(e); }
+    S.files = list; S.cur = -1; viewId = null; S.selected.clear();
+    saveAllLocal(); sortFiles(); refreshAll(); renderFolders(); libState();
+    dirDirty = true; await flushDir();
+    backgroundScan(); storeQueue();
+    if (S.articles.length) goNext(-1);
+    toast(`Saving to ${handle.name}`, 3000);
+    return true;
+  } catch (e) {
+    console.warn('folder open failed', e);
+    toast('That folder could not be opened' + (e?.name === 'NotFoundError' ? ' (it may have been moved)' : '') + '. Choose it again from the library.', 6000);
+    setStore(); return false;
+  }
+}
+async function loadBrowserLibrary() {
+  let docs = [];
+  try { docs = await idb.all('files'); } catch (e) { console.warn('browser storage unavailable', e); }
+  for (const d of docs) if (!S.files.some((f) => f.id === d.id)) S.files.push(Object.assign(fileFromDoc(d), { stored: true }));
+  sortFiles(); rebuildArticles(); renderFolders(); libState();
+  if (S.cur < 0 && S.files.length) goNext(-1);
+  try { if (docs.length && navigator.storage?.persist) navigator.storage.persist(); } catch {}
+}
+async function initStore() {
+  setStore();
+  if (canUseFolder) {
+    let saved = null; try { saved = await idb.get('kv', 'dir'); } catch {}
+    if (saved?.handle) {
+      let perm = 'prompt'; try { perm = await saved.handle.queryPermission({ mode: 'readwrite' }); } catch {}
+      if (perm === 'granted' && await connectDir(saved.handle, saved.coder, true)) return;
+      S.pendingDir = saved; setStore();
+      if (await ask(`<h3>Open your Chota folder?</h3><p class="small">Your PDFs and codes are in <b>${esc(saved.handle.name)}</b>. Your browser asks for permission to open it each visit.</p>`, 'Open folder')) {
+        await reconnectDir(); if (S.dir) return;
+      }
+    }
+  }
+  await loadBrowserLibrary();
 }
 
 /* ---------- PDF handling ---------- */
@@ -198,13 +350,19 @@ function guessMeta(lines, fileName) {
   return meta;
 }
 function keyFor(f, start) { return f.id + '~p' + start; }
-const libCol = () => ud('project').collection('files');
-function fileDoc(f) { return { id: f.id, name: f.name, size: f.size || 0, assetId: f.assetId || '', folder: f.folder || '', numPages: f.numPages || null, starts: f.starts, metaByStart: f.metaByStart || {}, addedAt: f.addedAt || Date.now(), savedAt: Date.now() }; }
-function persistFile(f) { if (f.assetId) cloudWrite(() => libCol().doc(f.id).set(fileDoc(f))); }
-function persistFolders() { lsSet('cc_folders', S.folders); cloudWrite(() => ud('folders').set({ list: S.folders })); }
+function fileDoc(f) { return { id: f.id, name: f.name, size: f.size || 0, path: f.path || '', folder: f.folder || '', numPages: f.numPages || null, starts: f.starts, metaByStart: f.metaByStart || {}, addedAt: f.addedAt || Date.now(), savedAt: Date.now() }; }
+function persistFile(f) {
+  if (S.dir) queueSave();
+  else if (f.stored) idb.put('files', f.id, fileDoc(f)).catch((e) => console.warn('could not save PDF details', e));
+}
+function persistFolders() { lsSet('cc_folders', S.folders); queueSave(); }
 async function fileBytes(f) {
   if (f.file) return f.file.arrayBuffer();
-  if (f.assetId) { const r = await fetch('/_blob/' + f.assetId); if (!r.ok) throw new Error('The saved PDF could not be loaded (' + r.status + '). Add it again.'); return r.arrayBuffer(); }
+  if (f.handle) {
+    try { return await (await f.handle.getFile()).arrayBuffer(); }
+    catch (e) { throw new Error(e?.name === 'NotFoundError' ? 'This PDF is no longer in your folder.' : 'Your folder is not open. Click Reconnect in the library.'); }
+  }
+  if (f.stored) { let b = null; try { b = await idb.get('pdfs', f.id); } catch {} if (b) return b.arrayBuffer(); throw new Error('The copy of this PDF saved in this browser is missing. Add it again.'); }
   throw new Error('This PDF is not in your library. Add it again.');
 }
 function sortFiles() { S.files.sort((a, b) => natCmp(a.folder || '', b.folder || '') || natCmp(a.name, b.name)); }
@@ -225,12 +383,12 @@ async function addFiles(list) {
       if (byId.has(id)) { skipped++; continue; }
     }
     const f = { id, file, name: file.name, size: file.size, folder, addedAt: Date.now(), scanned: false, numPages: null, starts: [1], pages: null, metaByStart: {} };
-    S.files.push(f); byId.set(id, f); added++;
+    S.files.push(f); byId.set(id, f); S.hidden.delete(id); added++;
   }
   sortFiles(); rebuildArticles(); renderFolders();
   toast(`${added} PDF${added === 1 ? '' : 's'} added${folder ? ' to ' + folder : ''}${skipped ? `, ${skipped} already in your library` : ''}`, 3000);
   if (S.cur < 0) await goNext(-1);
-  backgroundScan(); uploadQueue();
+  backgroundScan(); storeQueue();
 }
 function rebuildArticles() {
   const curKey = S.articles[S.cur]?.key;
@@ -291,41 +449,50 @@ async function backgroundScan() {
   }
   scanning = false; libState();
 }
-let uploading = false;
-async function uploadQueue() {
-  if (uploading || !S.assets || !S.cloud) { libState(); return; }
-  uploading = true;
-  while (true) {
-    const todo = S.files.filter((x) => x.file && !x.assetId && !x.uploadFailed);
-    libState(todo.length);
-    const f = todo[0]; if (!f) break;
-    try {
-      if (!f.scanned) await scanFile(fileIndex(f));
-      if (f.size > 20 * 1024 * 1024) throw { code: 'too_large' };
-      let res;
-      try { res = await S.assets.upload(f.file, { type: 'application/pdf' }); }
-      catch (e) {
-        if (e?.code !== 'store_unavailable' && e?.code !== 'rate_limited') throw e;
-        await sleep(e.code === 'rate_limited' ? 6000 : 1500);
-        res = await S.assets.upload(f.file, { type: 'application/pdf' });
-      }
-      f.assetId = res.id; persistFile(f);
-    } catch (e) {
-      f.uploadFailed = e?.code || 'error'; console.warn('upload failed', f.name, e);
-      if (e?.code === 'quota_or_state') { S.libFull = true; toast('Library storage is full. The other PDFs stay open for this visit only.', 6000); break; }
-      if (e?.code === 'too_large') toast(f.name + ' is over 20 MB, so it stays for this visit only.', 4000);
-    }
+// Keeps PDFs opened this visit: copies them into the folder, or saves them in this browser
+async function copyIntoDir(f) {
+  const dir = S.dir.handle;
+  let name = f.name;
+  for (let i = 2; ; i++) {
+    let ex = null;
+    try { ex = await dir.getFileHandle(name); } catch (e) { if (e?.name !== 'NotFoundError' && e?.name !== 'TypeMismatchError') throw e; }
+    if (!ex) break;
+    if ((await ex.getFile()).size === f.file.size) { f.handle = ex; f.path = name; return; }
+    name = f.name.replace(/(\.pdf)?$/i, `-${i}.pdf`);
   }
-  uploading = false; libState(); renderQueue();
+  f.handle = await writeText(dir, [name], f.file); f.path = name;
+}
+let storing = false;
+async function storeQueue() {
+  if (storing) return;
+  storing = true;
+  try {
+    while (true) {
+      const todo = S.files.filter((x) => x.file && !x.handle && (S.dir || !x.stored) && !x.storeFailed);
+      libState(todo.length);
+      const f = todo[0]; if (!f) break;
+      const dir = S.dir;
+      try {
+        if (dir) {
+          await copyIntoDir(f);
+          if (f.migrate) { f.migrate = false; f.stored = false; idb.del('pdfs', f.id).catch(() => {}); idb.del('files', f.id).catch(() => {}); }
+        } else { await idb.put('pdfs', f.id, f.file); f.stored = true; }
+        persistFile(f);
+      } catch (e) {
+        f.storeFailed = true; console.warn('could not keep PDF', f.name, e);
+        if (!dir && e?.name === 'QuotaExceededError') { S.libFull = true; toast('Browser storage is full. The other PDFs stay open for this visit only.', 6000); break; }
+        if (dir) { toast('Could not copy ' + f.name + ' into your folder.', 4000); }
+      }
+    }
+  } finally { storing = false; libState(); renderQueue(); }
 }
 function libState(pending) {
-  const n = S.files.length, saved = S.files.filter((f) => f.assetId).length;
+  const n = S.files.length, kept = S.files.filter((f) => f.handle || f.stored).length;
   let t = '';
-  if (pending) t = `Saving PDFs to your library, ${pending} to go`;
+  if (pending) t = S.dir ? `Copying PDFs into your folder, ${pending} to go` : `Saving PDFs in this browser, ${pending} to go`;
   else if (!n) t = '';
-  else if (!S.assets || !S.cloud) t = `${n} PDFs open for this visit only. Add them again next time.`;
-  else if (saved < n) t = `${saved} of ${n} PDFs saved${S.libFull ? '. Library storage is full' : ''}.`;
-  else t = `${n} PDFs saved, ${S.articles.length} articles`;
+  else if (kept < n) t = `${kept} of ${n} PDFs kept${S.libFull ? '. Browser storage is full' : ''}. The rest are open for this visit only.`;
+  else t = `${n} PDF${n === 1 ? '' : 's'}, ${S.articles.length} article${S.articles.length === 1 ? '' : 's'}`;
   $('#libState').textContent = t;
 }
 
@@ -424,14 +591,15 @@ async function autoSort() {
 async function removeSelected() {
   const files = S.files.filter((f) => S.selected.has(f.id));
   if (!files.length) return;
-  if (!(await ask(`<h3>Remove ${files.length} PDF${files.length > 1 ? 's' : ''} from your library?</h3><p class="small">The saved PDF files are deleted. Codes you already saved for them stay in your data.</p>`, 'Remove'))) return;
+  const where = S.dir ? `They stay in your folder ${esc(S.dir.name)} on the computer but are hidden from the library. Adding one again brings it back.` : 'The copies saved in this browser are deleted.';
+  if (!(await ask(`<h3>Remove ${files.length} PDF${files.length > 1 ? 's' : ''} from your library?</h3><p class="small">${where} Codes you already saved for them stay in your data.</p>`, 'Remove'))) return;
   for (const f of files) {
-    if (f.assetId && S.assets) { try { await S.assets.delete(f.assetId); } catch (e) { console.warn(e); } }
-    if (S.cloud) cloudWrite(() => libCol().doc(f.id).delete());
+    if (S.dir) S.hidden.add(f.id);
+    else if (f.stored) { idb.del('pdfs', f.id).catch(() => {}); idb.del('files', f.id).catch(() => {}); }
   }
   S.files = S.files.filter((f) => !S.selected.has(f.id));
   S.selected.clear(); S.cur = -1; viewId = null;
-  rebuildArticles(); renderFolders(); libState(); goNext(-1);
+  queueSave(); rebuildArticles(); renderFolders(); libState(); goNext(-1);
 }
 
 /* ---------- viewer ---------- */
@@ -542,7 +710,7 @@ function renderQueue(onlyCur) {
     const rec = S.records[it.key];
     const meta = rec?.meta || (f && f.metaByStart[a.start]) || {};
     const title = meta.headline || (f ? f.name : it.key.replace(/~p\d+$/, ''));
-    const sub = a ? [!S.folderSel && f.folder, f.name + (f.starts.length > 1 ? `, p. ${a.start}–${a.end}` : ''), f.file && !f.assetId && S.assets && S.cloud && !f.uploadFailed ? 'saving' : ''].filter(Boolean).join('  /  ') : 'PDF not in the library yet';
+    const sub = a ? [!S.folderSel && f.folder, f.name + (f.starts.length > 1 ? `, p. ${a.start}–${a.end}` : ''), f.file && !f.handle && (S.dir || !f.stored) && !f.storeFailed ? 'saving' : ''].filter(Boolean).join('  /  ') : 'PDF not in the library yet';
     if (q && !(title + ' ' + sub).toLowerCase().includes(q)) continue;
     if (++shown > 1500) break;
     const ex = S.mode === 'code' && rec?.excluded;
@@ -574,8 +742,10 @@ function renderHead() {
   if (!S.editMeta && m.outlet) return;
   const pickOutlet = (o) => { S.meta.outlet = o.outlet; S.meta.country = o.country; renderHead(); };
   const inp = (k, attrs = {}) => el('input', { value: S.meta[k] || '', oninput: (e) => { S.meta[k] = e.target.value; }, onchange: () => renderHead(), ...attrs });
+  const outs = outletList();
   box.append(el('div', { class: 'metaedit' },
-    el('label', {}, 'Outlet'), el('div', { class: 'chips' }, outletList().map((o) => el('button', { class: o.outlet === S.meta.outlet ? 'on' : '', onclick: () => pickOutlet(o) }, o.outlet))),
+    outs.length ? el('label', {}, 'Pick') : null, outs.length ? el('div', { class: 'chips' }, outs.map((o) => el('button', { class: o.outlet === S.meta.outlet ? 'on' : '', onclick: () => pickOutlet(o) }, o.outlet))) : null,
+    el('label', { for: 'mOutlet' }, 'Outlet'), el('div', { style: 'display:flex;gap:6px' }, inp('outlet', { id: 'mOutlet', placeholder: 'Outlet' }), inp('country', { id: 'mCountry', placeholder: 'Country', 'aria-label': 'Country', style: 'width:130px' })),
     el('label', { for: 'mDate' }, 'Date'), el('div', { style: 'display:flex;gap:6px' }, inp('date', { id: 'mDate', placeholder: 'Date' }), inp('year', { id: 'mYear', placeholder: 'Year', style: 'width:80px' })),
     el('label', { for: 'mHead' }, 'Headline'), inp('headline', { id: 'mHead' })));
 }
@@ -585,6 +755,17 @@ function renderForm() {
   ['#btnSave', '#btnExclude', '#btnClear'].forEach((q) => $(q).disabled = !a);
   $('#btnExclude').style.display = S.mode === 'recode' ? 'none' : '';
   renderHead();
+  const toCodebook = () => switchView('codebook');
+  if (!vars().length) {
+    body.append(el('div', { style: 'padding:20px', class: 'muted' },
+      el('h3', { style: 'margin:0 0 8px;color:var(--ink)' }, 'Getting started'),
+      el('ol', { style: 'margin:0 0 14px;padding-left:20px;line-height:1.7' },
+        el('li', {}, 'Write your questions in ', el('button', { class: 'link', onclick: toCodebook }, 'Codebook'), ', or paste them in all at once.'),
+        el('li', {}, 'Optional: in ', el('button', { class: 'link', onclick: () => switchView('settings') }, 'Settings'), ', list your outlets so Chota can spot them, and set a target and deadline.'),
+        el('li', {}, 'Add your PDFs. In Chrome or Edge, choose ', el('b', {}, 'Save to a folder'), ' in the library to keep everything between visits.')),
+      el('button', { class: 'primary', onclick: toCodebook }, 'Set up the codebook')));
+    $('#formMsg').classList.remove('on'); return;
+  }
   if (!a) { body.append(el('p', { class: 'muted', style: 'padding:20px' }, 'Open an article to see the coding questions.')); $('#formMsg').classList.remove('on'); return; }
   const rec = S.mode === 'recode' ? S.recodes[a.key] : S.records[a.key];
   if (S.mode === 'recode') $('#notes').append(el('div', { class: 'note info' }, 'Recoding. Your first codes are hidden, so code this article fresh.'));
@@ -690,13 +871,14 @@ async function mergeNext() {
 /* ---------- progress ---------- */
 function renderProgress() {
   const recs = Object.values(S.records);
-  const done = recs.length, target = Math.max(1, +S.settings.target || 1);
-  $('#progText').innerHTML = `<b>${done}</b> of ${target} coded`;
-  $('#progBar').style.width = Math.min(100, (done / target) * 100) + '%';
+  const done = recs.length, target = Math.max(0, Math.round(+S.settings.target || 0));
+  $('#progText').innerHTML = target ? `<b>${done}</b> of ${target} coded` : `<b>${done}</b> coded`;
+  $('#progBar').parentElement.style.display = target ? '' : 'none';
+  $('#progBar').style.width = target ? Math.min(100, (done / target) * 100) + '%' : '0';
   const today = todayStr();
   const nToday = recs.filter((r) => dayOf(r.firstSavedAt || r.savedAt) === today).length;
   let pace = `${nToday} today`;
-  if (S.settings.deadline) {
+  if (S.settings.deadline && target) {
     const dl = new Date(S.settings.deadline + 'T23:59:59'); const now = new Date();
     const days = Math.max(1, Math.ceil((dl - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000));
     const left = Math.max(0, target - done + nToday);
@@ -752,7 +934,13 @@ function codebookToText() {
 
 /* ---------- export ---------- */
 function buildTable(includeEx = true) {
+  // listed outlets keep their order; ones typed in while coding are numbered after them
   const outs = outletList(), countries = countryList();
+  for (const r of Object.values(S.records).sort((a, b) => (a.firstSavedAt || a.savedAt || 0) - (b.firstSavedAt || b.savedAt || 0))) {
+    const o = (r.meta?.outlet || '').trim(), c = (r.meta?.country || '').trim();
+    if (o && !outs.some((x) => x.outlet === o)) outs.push({ outlet: o, country: c });
+    if (c && !countries.includes(c)) countries.push(c);
+  }
   const recs = Object.values(S.records).filter((r) => includeEx || !r.excluded).sort((a, b) => natCmp(a.key, b.key));
   const cols = [
     { name: 'article_id', label: 'Article ID (file and start page)', type: 'str' },
@@ -881,8 +1069,8 @@ async function restore(file) {
   if (!(await ask(`<h3>Restore backup?</h3><div class="small">${n} coded articles from ${esc(data.exportedAt || '')}. Articles in the backup replace the same articles here when the backup copy is newer. The codebook and settings are replaced.</div>`, 'Restore'))) return;
   S.codebook = data.codebook || S.codebook; S.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings || {});
   S.fileSplits = data.fileSplits || S.fileSplits;
-  for (const [k, r] of Object.entries(data.records || {})) if (!S.records[k] || (S.records[k].savedAt || 0) < (r.savedAt || 0)) { S.records[k] = r; cloudWrite(() => codesCol().doc(safeSeg(k)).set(r)); }
-  for (const [k, r] of Object.entries(data.recodes || {})) if (!S.recodes[k] || (S.recodes[k].savedAt || 0) < (r.savedAt || 0)) { S.recodes[k] = r; cloudWrite(() => recodesCol().doc(safeSeg(k)).set(r)); }
+  for (const [k, r] of Object.entries(data.records || {})) if (!S.records[k] || (S.records[k].savedAt || 0) < (r.savedAt || 0)) S.records[k] = r;
+  for (const [k, r] of Object.entries(data.recodes || {})) if (!S.recodes[k] || (S.recodes[k].savedAt || 0) < (r.savedAt || 0)) S.recodes[k] = r;
   if (data.sample) S.sample = data.sample;
   lsSet('cc_records', S.records); lsSet('cc_recodes', S.recodes);
   persistCodebook(); persistSettings(); persistSample();
@@ -937,7 +1125,7 @@ function setMode(m) {
 
 /* ---------- settings ---------- */
 function renderSettings() {
-  $('#setTarget').value = S.settings.target; $('#setDeadline').value = S.settings.deadline || '';
+  $('#setTarget').value = +S.settings.target || ''; $('#setDeadline').value = S.settings.deadline || '';
   $('#setOutlets').value = S.settings.outlets; $('#setHl').value = S.settings.hl; applyTheme();
 }
 
@@ -1013,7 +1201,7 @@ $('#applyBulk').onclick = async () => {
   if (!(await ask(`<h3>Replace the codebook?</h3><div class="small">${parsed.length} variables: ${parsed.map((v) => esc(v.name)).join(', ')}</div>`, 'Replace'))) return;
   S.codebook = { vars: parsed }; persistCodebook(); renderCodebook(); renderForm(); toast('Codebook updated');
 };
-$('#loadExample').onclick = async () => { if (!(await ask('<h3>Load the example questions?</h3><p class="small">This replaces your current codebook with 16 example questions on AI orientation, actors, benefits, risks, tone and genre. Edit or delete any of them afterwards. Codes already saved keep their values.</p>', 'Load'))) return; S.codebook = JSON.parse(JSON.stringify(DEFAULT_CODEBOOK)); persistCodebook(); renderCodebook(); renderForm(); toast('Example questions loaded'); };
+$('#loadExample').onclick = async () => { if (!(await ask('<h3>Load the example questions?</h3><p class="small">This replaces your current codebook with 16 example questions on AI orientation, actors, benefits, risks, tone and genre. Edit or delete any of them afterwards. Codes already saved keep their values.</p>', 'Load'))) return; S.codebook = JSON.parse(JSON.stringify(EXAMPLE_CODEBOOK)); persistCodebook(); renderCodebook(); renderForm(); toast('Example questions loaded'); };
 $('#cbToText').onclick = () => { $('#bulkCb').value = codebookToText(); };
 document.querySelectorAll('[data-exp]').forEach((b) => b.onclick = () => doExport(b.dataset.exp));
 $('#btnNewFolder').onclick = newFolder; $('#btnAutoSort').onclick = autoSort; $('#btnDelFolder').onclick = deleteFolder;
@@ -1031,7 +1219,7 @@ $('#dlRel').onclick = () => {
   offer(`intracoder_reliability_${todayStr()}.csv`, lines.join('\r\n') + '\r\n');
 };
 $('#saveSettings').onclick = () => {
-  S.settings.target = Math.max(1, +$('#setTarget').value || 940); S.settings.deadline = $('#setDeadline').value;
+  S.settings.target = Math.max(0, Math.round(+$('#setTarget').value || 0)); S.settings.deadline = $('#setDeadline').value;
   S.settings.outlets = $('#setOutlets').value; S.settings.hl = $('#setHl').value;
   persistSettings(); renderProgress(); renderText(); toast('Settings saved');
 };
@@ -1063,9 +1251,11 @@ document.addEventListener('keydown', (e) => {
     if (n) { n.focus(); }
   }
 });
-window.addEventListener('beforeunload', () => { lsSet('cc_records', S.records); });
+window.addEventListener('beforeunload', () => { lsSet('cc_records', S.records); if (dirDirty) flushDir(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && dirDirty) flushDir(); });
+$('#saveDot').onclick = () => { if (!S.dir && S.pendingDir) reconnectDir(); else { switchView('code'); setLib(true); } };
 
 /* ---------- boot ---------- */
 if (!window.pdfjsLib) { $('#pages').innerHTML = '<div class="drop"><h2>The PDF viewer did not load</h2><p>Check your internet connection, then reload the page.</p></div>'; }
 applyTheme(); setLib(lsGet('cc_lib', 0) === 1 && !libOverlay()); renderProgress(); renderForm(); renderQueue();
-initCloud();
+initStore();
