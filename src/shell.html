@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chọta</title>
+<title>Chota</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
@@ -266,7 +266,7 @@ td.bad{color:var(--pencil-text);font-weight:700}
 </head>
 <body>
 <nav id="rail" aria-label="Sections">
-  <div class="logo"><svg viewBox="0 0 26 26" aria-hidden="true"><rect x="2" y="2" width="22" height="22" fill="var(--pencil)"/><path d="M8 13.5l3.4 3.4L18.5 9.5" stroke="var(--pencil-ink)" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Chọta</div>
+  <div class="logo"><svg viewBox="0 0 26 26" aria-hidden="true"><rect x="2" y="2" width="22" height="22" fill="var(--pencil)"/><path d="M8 13.5l3.4 3.4L18.5 9.5" stroke="var(--pencil-ink)" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Chota</div>
   <button data-v="code" class="on"><svg class="i" viewBox="0 0 24 24"><path d="M4 5h9M4 10h9M4 15h6"/><path d="M14 17.5l2 2 4-4.5"/></svg>Code</button>
   <button id="railLib"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Library</button>
   <button data-v="codebook"><svg class="i" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Codebook</button>
@@ -316,7 +316,7 @@ td.bad{color:var(--pencil-text);font-weight:700}
       <button id="btnSplit" title="Split this article in two"><svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.5"/><circle cx="6" cy="17" r="2.5"/><path d="M8 8.5L20 16M8 15.5L20 8"/></svg></button>
       <button id="btnMerge" title="Join the next article into this one"><svg class="i" viewBox="0 0 24 24"><path d="M6 4v5a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v5"/><path d="M18 4v5a3 3 0 0 1-3 3"/></svg></button>
     </div>
-    <div id="pages"><div class="drop"><h2>Drop your article PDFs here</h2><p>One PDF per article, or batch downloads from Nexis Uni. Chọta splits batches into articles and keeps every PDF in your library.</p><div class="row"><button class="primary" onclick="document.getElementById('fileIn').click()">Choose PDFs</button><button onclick="document.getElementById('dirIn').click()">Choose a folder</button></div></div></div>
+    <div id="pages"><div class="drop"><h2>Drop your article PDFs here</h2><p>One PDF per article, or batch downloads from Nexis Uni. Chota splits batches into articles and keeps every PDF in your library.</p><div class="row"><button class="primary" onclick="document.getElementById('fileIn').click()">Choose PDFs</button><button onclick="document.getElementById('dirIn').click()">Choose a folder</button></div></div></div>
     <div id="textview"></div>
   </div>
 
@@ -343,7 +343,7 @@ td.bad{color:var(--pencil-text);font-weight:700}
   <div id="cbState"></div>
   <section class="lockable">
     <h2>Import a codebook</h2>
-    <p>Load a Word (.docx) or text codebook, or a codebook file someone shared from Chọta (.json). Chọta reads numbered variables such as <code>V3 ELIGIBLE</code> with their codes, codes like 97 and 98, skip instructions such as "If 0, stop" or "skip to V9", and checks such as "V9 must be one of the framings coded 1 in V6 to V8". You can check everything before it loads.</p>
+    <p>Load a Word (.docx) or text codebook, or a codebook file someone shared from Chota (.json). Chota reads numbered variables such as <code>V3 ELIGIBLE</code> with their codes, codes like 97 and 98, skip instructions such as "If 0, stop" or "skip to V9", and checks such as "V9 must be one of the framings coded 1 in V6 to V8". You can check everything before it loads.</p>
     <div class="btnrow"><button class="primary" id="btnImportCb">Import a codebook…</button><input type="file" id="cbFileIn" accept=".docx,.txt,.md,.json,text/plain,application/json" hidden></div>
   </section>
   <section class="lockable">
@@ -357,7 +357,7 @@ td.bad{color:var(--pencil-text);font-weight:700}
   </section>
   <section class="lockable">
     <h2>Reasons for excluding an article</h2>
-    <p>Chọta asks for one of these whenever an article is excluded, by the Exclude button or by a skip rule. One per line. The reason is exported with the article, ready for a sample flow table.</p>
+    <p>Chota asks for one of these whenever an article is excluded, by the Exclude button or by a skip rule. One per line. The reason is exported with the article, ready for a sample flow table.</p>
     <textarea id="cbReasons" rows="6"></textarea>
   </section>
   <section>
@@ -413,7 +413,7 @@ notes | Notes | text"></textarea>
   </section>
   <section>
     <h2>Backup</h2>
-    <p>Codes, codebook, folders, settings and recodes in one file. If you save to a folder, Chọta already keeps this file there and a dated copy in chota-backups. If you save in this browser only, download one at the end of each coding day.</p>
+    <p>Codes, codebook, folders, settings and recodes in one file. If you save to a folder, Chota already keeps this file there and a dated copy in chota-backups. If you save in this browser only, download one at the end of each coding day.</p>
     <div class="btnrow"><button data-exp="backup">Download backup</button><button id="btnRestore">Restore from a backup</button><input type="file" id="restoreIn" accept=".json,application/json" hidden></div>
   </section>
   <section id="copyCard" style="display:none">
@@ -431,13 +431,13 @@ notes | Notes | text"></textarea>
   </section>
   <section>
     <h2>Outlets</h2>
-    <p>One per line as <code>Outlet name = Country</code>. Chọta looks for these names on each article's first page and in file names, and fills in the outlet and country for you. The order sets the numeric codes, so the first outlet is 1. Outlets you type in while coding are numbered after these.</p>
+    <p>One per line as <code>Outlet name = Country</code>. Chota looks for these names on each article's first page and in file names, and fills in the outlet and country for you. The order sets the numeric codes, so the first outlet is 1. Outlets you type in while coding are numbered after these.</p>
     <textarea id="setOutlets" rows="10" placeholder="The Guardian = United Kingdom
 New York Times = United States"></textarea>
   </section>
   <section>
     <h2>Sampling log</h2>
-    <p>Import the spreadsheet of sampled articles (.xlsx or .csv, one row per article). Chọta matches each article to its row by headline or PDF file name. It fills in the outlet, country, date, year and headline from columns with those names, and fills any question whose name matches a column (for example <code>ARTICLE_ID</code>). Every column of the log is added to your exports.</p>
+    <p>Import the spreadsheet of sampled articles (.xlsx or .csv, one row per article). Chota matches each article to its row by headline or PDF file name. It fills in the outlet, country, date, year and headline from columns with those names, and fills any question whose name matches a column (for example <code>ARTICLE_ID</code>). Every column of the log is added to your exports.</p>
     <div class="btnrow"><button id="btnLog">Import a sampling log…</button><input type="file" id="logIn" accept=".xlsx,.xls,.csv" hidden></div>
     <div id="logBox" style="margin-top:12px"></div>
   </section>

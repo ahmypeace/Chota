@@ -60,7 +60,7 @@ const LEGACY_SETTINGS = {
 };
 
 /* ---------- state ---------- */
-// A browser holding Chọta data but no version mark was set up when the AI project was the default
+// A browser holding Chota data but no version mark was set up when the AI project was the default
 const LEGACY = lsGet('cc_v', 0) < 2 && ['cc_records', 'cc_codebook', 'cc_settings', 'cc_folders', 'cc_lib'].some((k) => lsGet(k, null) !== null);
 const S = {
   codebook: (() => {
@@ -126,7 +126,7 @@ function saveAllLocal() { lsSet('cc_records', S.records); lsSet('cc_recodes', S.
 
 function setStore(saving) {
   let text, title, ok = false;
-  if (S.dirError) { text = 'Not saved'; title = 'Chọta could not write to your folder. Click to reconnect it. Your codes are still kept in this browser.'; }
+  if (S.dirError) { text = 'Not saved'; title = 'Chota could not write to your folder. Click to reconnect it. Your codes are still kept in this browser.'; }
   else if (S.dir) { ok = true; text = saving ? 'Saving' : 'Saved'; title = `Codes are saved to ${S.dir.name}/${S.dir.file} after every article. Click to open the library.`; }
   else if (S.pendingDir) { text = 'Reconnect'; title = `Click to reopen your folder ${S.pendingDir.handle.name}.`; }
   else { text = 'This browser'; title = 'Codes and PDFs are kept in this browser only. Download a backup from Export now and then, or choose a folder to save to in the Library.'; }
@@ -138,7 +138,7 @@ function renderDirBar() {
   if (S.dir) b.innerHTML = `<span>Saving to <b>${esc(S.dir.name)}</b> / ${esc(S.dir.file)}</span><button class="quiet" id="dirBtn" title="Save to a different folder">Change</button>`;
   else if (S.pendingDir) b.innerHTML = `<span>Your folder <b>${esc(S.pendingDir.handle.name)}</b> is not open</span><button class="primary" id="dirBtn">Reconnect</button>`;
   else if (canUseFolder) b.innerHTML = `<span>Saved in this browser only</span><button id="dirBtn" title="Keep your PDFs and codes in a folder on this computer">Save to a folder…</button>`;
-  else b.innerHTML = '<span>Saved in this browser. To save to a folder on your computer instead, open Chọta in Chrome or Edge.</span>';
+  else b.innerHTML = '<span>Saved in this browser. To save to a folder on your computer instead, open Chota in Chrome or Edge.</span>';
   const btn = $('#dirBtn'); if (btn) btn.onclick = () => (!S.dir && S.pendingDir ? reconnectDir() : chooseDir());
 }
 
@@ -174,7 +174,7 @@ function flushDir() {
       console.warn('folder save failed', e);
       if (S.dir !== d) return;
       S.pendingDir = { handle: d.handle, coder: d.coder }; S.dir = null; S.dirError = true; setStore();
-      toast('Chọta could not save to your folder. Click Reconnect in the library. Your codes are still kept in this browser.', 7000);
+      toast('Chota could not save to your folder. Click Reconnect in the library. Your codes are still kept in this browser.', 7000);
     }
   });
   return dirChain;
@@ -196,7 +196,7 @@ async function chooseDir() {
   try { handle = await window.showDirectoryPicker({ id: 'chota', mode: 'readwrite' }); }
   catch (e) { if (e?.name !== 'AbortError') toast('Could not open that folder: ' + (e?.message || e), 5000); return; }
   let prev = S.dir || S.pendingDir; if (!prev) { try { prev = await idb.get('kv', 'dir'); } catch {} }
-  const ok = await ask(`<h3>Save to ${esc(handle.name)}</h3><p class="small">Chọta opens the PDFs in this folder and its subfolders, and saves your codes in it after every article. PDFs you add later are copied into it.</p><label class="small" style="display:block">Your name or initials <span class="mute">(optional; gives you your own codes file if several people share this folder)</span><input id="coderIn" style="width:100%;margin-top:6px" value="${esc(prev?.coder || '')}"></label>`, 'Use this folder');
+  const ok = await ask(`<h3>Save to ${esc(handle.name)}</h3><p class="small">Chota opens the PDFs in this folder and its subfolders, and saves your codes in it after every article. PDFs you add later are copied into it.</p><label class="small" style="display:block">Your name or initials <span class="mute">(optional; gives you your own codes file if several people share this folder)</span><input id="coderIn" style="width:100%;margin-top:6px" value="${esc(prev?.coder || '')}"></label>`, 'Use this folder');
   if (!ok) return;
   const coder = (document.getElementById('coderIn').value || '').trim();
   let same = false;
@@ -208,7 +208,7 @@ async function reconnectDir() {
   const p = S.pendingDir; if (!p) return chooseDir();
   let perm = 'denied';
   try { perm = await p.handle.requestPermission({ mode: 'readwrite' }); } catch (e) { console.warn(e); }
-  if (perm !== 'granted') { toast('Chọta needs your permission to open that folder.', 4000); return; }
+  if (perm !== 'granted') { toast('Chota needs your permission to open that folder.', 4000); return; }
   await connectDir(p.handle, p.coder, true);
 }
 // same = this browser was last saving to this folder and codes file, so its newer codes are merged in without asking
@@ -220,7 +220,7 @@ async function connectDir(handle, coder, same) {
     try { raw = await (await (await handle.getFileHandle(file)).getFile()).text(); } catch (e) { if (e?.name !== 'NotFoundError') throw e; }
     if (raw != null) {
       try { data = JSON.parse(raw); if (!data || typeof data !== 'object') throw 0; }
-      catch { await ask(`<h3>${esc(file)} could not be read</h3><p class="small">The codes file in ${esc(handle.name)} is damaged, so Chọta has left it alone. Restore a copy from the ${BACKUP_DIR} folder, or choose another folder.</p>`, 'OK'); setStore(); return false; }
+      catch { await ask(`<h3>${esc(file)} could not be read</h3><p class="small">The codes file in ${esc(handle.name)} is damaged, so Chota has left it alone. Restore a copy from the ${BACKUP_DIR} folder, or choose another folder.</p>`, 'OK'); setStore(); return false; }
       await writeText(handle, [BACKUP_DIR, file.replace(/\.json$/, `-${today}.json`)], raw);
     }
     const newer = (a, b) => !b || (a.savedAt || 0) > (b.savedAt || 0);
@@ -301,7 +301,7 @@ async function initStore() {
       let perm = 'prompt'; try { perm = await saved.handle.queryPermission({ mode: 'readwrite' }); } catch {}
       if (perm === 'granted' && await connectDir(saved.handle, saved.coder, true)) return;
       S.pendingDir = saved; setStore();
-      if (await ask(`<h3>Open your Chọta folder?</h3><p class="small">Your PDFs and codes are in <b>${esc(saved.handle.name)}</b>. Your browser asks for permission to open it each visit.</p>`, 'Open folder')) {
+      if (await ask(`<h3>Open your Chota folder?</h3><p class="small">Your PDFs and codes are in <b>${esc(saved.handle.name)}</b>. Your browser asks for permission to open it each visit.</p>`, 'Open folder')) {
         await reconnectDir(); if (S.dir) return;
       }
     }
@@ -902,7 +902,7 @@ function renderForm() {
       el('h3', { style: 'margin:0 0 8px;color:var(--ink)' }, 'Getting started'),
       el('ol', { style: 'margin:0 0 14px;padding-left:20px;line-height:1.7' },
         el('li', {}, 'Write your questions in ', el('button', { class: 'link', onclick: toCodebook }, 'Codebook'), ', or paste them in all at once.'),
-        el('li', {}, 'Optional: in ', el('button', { class: 'link', onclick: () => switchView('settings') }, 'Settings'), ', list your outlets so Chọta can spot them, and set a target and deadline.'),
+        el('li', {}, 'Optional: in ', el('button', { class: 'link', onclick: () => switchView('settings') }, 'Settings'), ', list your outlets so Chota can spot them, and set a target and deadline.'),
         el('li', {}, 'Add your PDFs. In Chrome or Edge, choose ', el('b', {}, 'Save to a folder'), ' in the library to keep everything between visits.')),
       el('button', { class: 'primary', onclick: toCodebook }, 'Set up the codebook')));
     $('#formMsg').classList.remove('on'); return;
@@ -1236,7 +1236,7 @@ function parseCodebookDoc(lines) {
   for (const b of blocks) {
     const isName = /^[A-Z][A-Z0-9_]*$/.test(b.rest);
     let name = sanitizeName(isName ? b.rest : b.ref.replace(/\./g, '_'));
-    if (/^coder(_?id)?$/i.test(name)) { dropped.push(`${b.ref} ${b.rest}: Chọta records the coder for you`); continue; }
+    if (/^coder(_?id)?$/i.test(name)) { dropped.push(`${b.ref} ${b.rest}: Chota records the coder for you`); continue; }
     if (RESERVED.includes(name.toLowerCase())) name = sanitizeName(b.ref + '_' + name);
     while (seen.has(name.toLowerCase())) name += '_2';
     seen.add(name.toLowerCase());
@@ -1305,14 +1305,14 @@ async function importCodebook(file) {
     if (/\.json$/i.test(file.name)) {
       const d = JSON.parse(await file.text());
       const cb = d.app === 'chota-codebook' || d.app === 'chota' || d.app === 'corpus-coder' ? d.codebook : null;
-      if (!cb || !Array.isArray(cb.vars)) throw new Error('that file has no Chọta codebook in it');
+      if (!cb || !Array.isArray(cb.vars)) throw new Error('that file has no Chota codebook in it');
       parsed = { vars: cb.vars, naCode: cb.naCode ?? '', missing: cb.missing || [], dropped: [], extra: { excludeReasons: cb.excludeReasons, locked: cb.locked } };
     } else {
       const lines = /\.docx$/i.test(file.name) ? await docxLines(file) : (await file.text()).split(/\r?\n/);
       parsed = parseAnyCodebook(lines);
     }
   } catch (e) { console.warn(e); toast('Could not read that file: ' + (e.message || e), 5000); return; }
-  if (!parsed.vars.length) { await ask('<h3>No questions found</h3><p class="small">Chọta looks for variables that start with a number such as <code>V3</code>, or lines written as <code>name | question | type | rule</code>. You can also add questions one by one.</p>', 'OK'); return; }
+  if (!parsed.vars.length) { await ask('<h3>No questions found</h3><p class="small">Chota looks for variables that start with a number such as <code>V3</code>, or lines written as <code>name | question | type | rule</code>. You can also add questions one by one.</p>', 'OK'); return; }
   applyParsedCodebook(parsed, file.name);
 }
 function parseAnyCodebook(lines) {
@@ -1542,7 +1542,7 @@ async function doExport(kind) {
 }
 async function restore(file) {
   let data; try { data = JSON.parse(await file.text()); } catch { toast('That file is not a backup.'); return; }
-  if (data.app !== 'chota' && data.app !== 'corpus-coder') { toast('That file is not a Chọta backup.'); return; }
+  if (data.app !== 'chota' && data.app !== 'corpus-coder') { toast('That file is not a Chota backup.'); return; }
   const n = Object.keys(data.records || {}).length;
   if (!(await ask(`<h3>Restore backup?</h3><div class="small">${n} coded articles from ${esc(data.exportedAt || '')}. Articles in the backup replace the same articles here when the backup copy is newer. The codebook and settings are replaced.</div>`, 'Restore'))) return;
   S.codebook = data.codebook || S.codebook; S.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings || {});
