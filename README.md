@@ -21,9 +21,9 @@ When you add PDFs, Chota reads the text of each article's first page and fills i
 | Date and year | The first date written like `March 3, 2025` or `3 March 2025`. If there's none, a year in the file name |
 | Headline | The first line that isn't a page number, date, outlet name or database label |
 | Word count | A `Length: 850 words` line, which Nexis Uni adds |
-| Article boundaries | Nexis Uni batch PDFs are split into articles at `Page 1 of N` or `End of Document`. Any other PDF counts as one article |
+| Article boundaries | Batch PDFs are split into articles: Nexis Uni at `Page 1 of N` or `End of Document`, ProQuest at `Document 3 of 50`, Factiva at the `Document` line with the Factiva ID that ends each article. Splits happen at page breaks. Any other PDF counts as one article |
 
-Check these details on each article. Click **Edit details** above the questions to correct them or type them in. Outlets you type that aren't in your list still get numeric codes in the export. These rules were written for Nexis Uni downloads. PDFs from other sources (ProQuest, Factiva, a newspaper's website) work too, but you may need to type in the outlet or fix the headline, and use **Split** to separate articles in a combined PDF.
+Check these details on each article. Click **Edit details** above the questions to correct them or type them in. Outlets you type that aren't in your list still get numeric codes in the export. These rules were written for Nexis Uni downloads. The ProQuest and Factiva markers follow those databases' usual export layout but haven't been tested on real exports. If a batch isn't split correctly, use **Split** and **Merge**. A sampling log (see below) can supply the details instead.
 
 ## What it does
 
@@ -33,9 +33,12 @@ Check these details on each article. Click **Edit details** above the questions 
 - Saves after every article, to a folder on your computer or in the browser (see below). It shows your daily pace against a target and deadline.
 - Has a text view with your search terms highlighted, and light and dark modes.
 - Keeps PDFs in a library with folders, and can sort them by country, outlet and year automatically.
-- Checks intracoder reliability. It draws a random subsample, hides your first codes while you recode, and reports percent agreement and Krippendorff's alpha (nominal) for each variable.
+- Checks answers against the codebook before saving, for example that the dominant framing is one of the framings coded Yes.
+- Asks for a reason whenever an article is excluded.
+- In the text view, numbers the paragraphs (P1, P2…). Selecting a passage offers **Add to note**, which adds the quote and its paragraph number to your note question.
+- Reliability: compares coders, or you against yourself on a recoded sample. Reports percent agreement and Krippendorff's alpha (nominal, ordinal or interval, following each question's measure) with a 95% bootstrap interval, and lists every disagreement to settle.
 - Exports:
-  - SPSS `.sav` with variable and value labels
+  - SPSS `.sav` with variable labels, value labels, missing values, measure levels and full-length text
   - Excel with a codebook sheet
   - CSV
   - an R and Python bundle with loader scripts
@@ -66,18 +69,96 @@ Share one folder of PDFs (for example a shared OneDrive or Teams folder). Each c
 
 **Remove** on a PDF hides it from your library. It does not delete the file from the folder.
 
-## Codebook format
+## Sampling log
 
-You can paste a codebook in the Codebook screen, one question per line:
+In **Settings**, import the spreadsheet of sampled articles (.xlsx or .csv). Chota matches each article to its row by headline or PDF file name. It then fills in:
+
+- the outlet, country, date, year and headline, from columns with those names
+- any question whose name matches a column. `V1_ARTICLE_ID` is filled from `ARTICLE_ID`
+
+Every column of the log is added to the export, so outlet-level variables such as GDP per capita end up in the same SPSS file.
+
+## Reliability
+
+**Compare coders.** Each coder saves to their own `chota-codes-name.json` in a shared folder, or downloads a backup from Export. On the Reliability screen, load the other coders' files, or click **Use the codes files in my folder**. Articles coded by two or more people are compared. Each variable gets percent agreement, Krippendorff's alpha and a 95% interval from 1,000 bootstrap resamples of the articles. Disagreements are listed article by article, and the list can be downloaded to settle them.
+
+**Recode a sample.** With one coder, draw a random sample and recode it about a week later, without seeing your first codes.
+
+Alpha follows each question's measure: nominal, ordinal, or interval for Scale questions. Skipped questions and missing-value codes (such as 98) are left out of the calculation.
+
+## Your codebook
+
+### Importing it
+
+On the Codebook screen, **Import a codebook…** reads a Word (.docx) or text file in which each variable starts with a number such as `V3`:
 
 ```
-name | question | type | coding rule
-market | Is AI presented as a market? | binary | Products, investment, jobs, revenue
-dominant | Which orientation gets the most space? | single: 1=Market; 2=Governance; 3=Capability; 4=None
+V3  ELIGIBLE                                      V1 Does the account have a profile photo?
+Question | Is AI a substantive subject?           0=Egg (skip to Section 2)
+Codes | 0 No; 1 Yes                               1=other image
+Skip | If 0, stop and log the reason.
+```
+
+Chota picks up:
+
+- each question's codes
+- write-in questions
+- codes used throughout, such as `97 | Not applicable` and `98 | Cannot determine`
+- skip instructions: "If 0, stop", "If 0, code V11 = 97 and V12 = 97", "skip to V9" and "skip to Section 2"
+
+It shows you what it found before replacing anything. Check the result, especially conditional skips such as "if V2 is also 0", which have to be set by hand.
+
+### Skip rules
+
+Each question can have rules such as **If the answer is 0, then end coding and mark the article excluded**, **end coding**, or **skip to V11**. While coding, skipped questions are greyed out and don't need answers. When coding ends, press `Enter` to save.
+
+### Skipped and missing codes
+
+- **Code for skipped questions** (for example 97): skipped questions get this code in the data. That keeps them separate from questions a coder left empty.
+- **Missing-value codes** (for example 97, 98): these stay in the data, but are marked as user-missing in the SPSS file. The R and Python loaders make a `d_analysis` copy in which they are NA. Either way they drop out of percentages and models, and the codes are still there to report.
+
+Codes with two digits can be typed on the keyboard: press `9` then `8` for 98.
+
+### Checks
+
+A categories question can be linked to earlier Yes/No questions, for example `1=MARKET; 2=GOVERNANCE; 3=CAPABILITY; 0=none`. Chota then warns before saving if V9 names a framing that wasn't coded Yes, or is 0 while one was. You can fix the codes, or press `Enter` again to save anyway. Articles saved anyway carry the warning in a `check_flags` column. On import, Chota sets this up from lines like "V9 must be one of the framings coded 1 in V6 to V8".
+
+### Measure
+
+Each question has a Measure (Nominal, Ordinal or Scale). It is written into the SPSS file and decides which alpha is used.
+
+### Exclusion reasons
+
+When an article is excluded, by the Exclude button or by a rule such as "V3 = 0, end coding and exclude", Chota asks for the reason. Edit the list of reasons on the Codebook screen. Reasons are exported in `exclude_reason`.
+
+### Sharing and versions
+
+**Download codebook** saves the codebook as a file that other coders open with **Import a codebook…**. A locked copy can't be edited until someone unlocks it. Each coded article records the codebook version it was coded with (`codebook_version` in the export), and the Codebook screen warns when some articles were coded under an earlier version.
+
+### Pasting a codebook
+
+You can also paste a codebook, one question per line:
+
+```
+name | question | type | coding rule | skip rules
+eligible | Is AI a substantive subject? | binary | Two or more sentences on AI | skip: 0=exclude
+press | Based on a press release? | single: 0=No; 1=Yes; 98=Cannot determine
+actor | Who is the main actor? | text: 0=No main actor | | skip: 0=notes
 notes | Notes | text
 ```
 
-`binary` exports as 1 = Yes and 0 = No. Questions left unanswered export as missing.
+## Export
+
+The SPSS, Excel, CSV and R/Python exports contain, for each coded article:
+
+- the article details
+- every question
+- `coder`, `exclude_reason`, `check_flags`, `codebook_version`, the date coded and the seconds spent
+- the sampling log's columns, if one is loaded
+
+Tick **Start variable names with question numbers** to get names such as `V3_ELIGIBLE`.
+
+`binary` exports as 1 = Yes and 0 = No. In skip rules, `exclude` ends coding and excludes the article, `end` just ends coding, and a variable name skips to that question. A question left unanswered exports as missing.
 
 ## Project layout
 

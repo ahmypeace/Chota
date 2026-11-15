@@ -131,6 +131,11 @@ svg.i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stro
 #textview{flex:1;overflow:auto;display:none;padding:6px 20px 30px}
 #textview .paper{max-width:680px;margin:0 auto;background:var(--sheet);padding:44px 52px;box-shadow:var(--shadow);font:17px/1.68 var(--read);white-space:pre-wrap}
 #textview mark{background:var(--mark);color:inherit;padding:0 1px;border-radius:2px}
+#textview{position:relative}
+#textview .paper{white-space:normal}
+#textview .paper p{margin:0 0 14px;position:relative}
+#textview .pn{position:absolute;left:-40px;top:3px;width:32px;text-align:right;font:12px/1.4 var(--ui);color:var(--ink-3);user-select:none}
+#quoteBtn{position:absolute;z-index:5;padding:6px 12px;font-size:13px;box-shadow:var(--shadow)}
 .drop{margin:auto;max-width:460px;text-align:center;padding:42px 36px;border:1.5px dashed var(--ink-3);border-radius:12px;background:var(--sheet);color:var(--ink-2)}
 .drop h2{font:700 24px/1.25 var(--display);color:var(--ink);margin:0 0 8px;text-wrap:balance}
 .drop p{margin:0 0 18px}
@@ -163,6 +168,9 @@ body.dragging .drop,body.dragging #pages{outline:3px dashed var(--pencil);outlin
 .qrow .qn{font-size:13px;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums;align-self:start;padding-top:2px}
 .qrow.miss .qn{color:var(--warn);font-weight:700}
 .qrow .ql{font-size:15px;line-height:1.35}
+.qrow.skipped{cursor:default;opacity:.55;padding-top:8px;padding-bottom:8px}
+.qrow.skipped .ql{font-size:14px}
+.skiptag{font-size:12px;color:var(--ink-3);white-space:nowrap}
 .qrow.done .ql{color:var(--ink-2)}
 .qrow .qh{grid-column:2/4;font-size:13px;color:var(--ink-2);display:none;line-height:1.45}
 .qrow.act .qh{display:block}
@@ -198,7 +206,17 @@ body.dragging .drop,body.dragging #pages{outline:3px dashed var(--pencil);outlin
 .vrow{display:grid;grid-template-columns:24px 170px minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:12px 0;border-bottom:1px solid var(--rule-2)}
 .vrow .num{color:var(--ink-3);font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
 .vrow input{width:100%}
-.vrow .opttext,.vrow .helptext{grid-column:3/6}
+.vrow .opttext,.vrow .helptext,.vrow .rules{grid-column:3/6}
+.vrow.fresh{background:var(--pencil-wash)}
+.cblocked .lockable{opacity:.6}
+.dis{border-top:1px solid var(--rule)}
+.disrow{padding:8px 0;border-bottom:1px solid var(--rule-2);line-height:1.45}
+.disrow .mute{white-space:pre-wrap}
+.grid2 select{width:100%}
+.rules{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-2)}
+.rule{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.rule button{padding:2px 8px}
+select{font:inherit;font-size:13px;color:var(--ink);background:var(--sheet);border:1px solid var(--rule);border-radius:2px;padding:5px 6px;max-width:100%}
 .vrow .seg button{padding:4px 9px;font-size:12.5px}
 .vrow .tools{display:flex}
 .vrow .tools button{padding:4px 7px}
@@ -320,14 +338,35 @@ td.bad{color:var(--pencil-text);font-weight:700}
 
 <section id="v-codebook" class="view"><div class="page"><div>
   <h1>Codebook</h1>
-  <p class="lede">Each variable is one question per article and one column in your data. Outlet, country, date, headline and pages are recorded for you, so leave them out.</p>
-  <section>
+  <p class="lede">Each variable is one question per article and one column in your data. Outlet, country, date, headline, pages and coder are recorded for you, so leave them out.</p>
+  <div id="cbState"></div>
+  <section class="lockable">
+    <h2>Import a codebook</h2>
+    <p>Load a Word (.docx) or text codebook, or a codebook file someone shared from Chota (.json). Chota reads numbered variables such as <code>V3 ELIGIBLE</code> with their codes, codes like 97 and 98, skip instructions such as "If 0, stop" or "skip to V9", and checks such as "V9 must be one of the framings coded 1 in V6 to V8". You can check everything before it loads.</p>
+    <div class="btnrow"><button class="primary" id="btnImportCb">Import a codebook…</button><input type="file" id="cbFileIn" accept=".docx,.txt,.md,.json,text/plain,application/json" hidden></div>
+  </section>
+  <section class="lockable">
     <div class="btnrow" style="justify-content:space-between"><h2 style="margin:0">Questions</h2><div class="btnrow"><button id="loadExample">Load example questions</button><button class="primary" id="addVar">Add a question</button></div></div>
     <div id="vlist"></div>
   </section>
+  <section class="lockable">
+    <h2>Skipped and missing codes</h2>
+    <p>When a skip rule applies, the skipped questions are filled with the not-applicable code in your data, so they stay separate from questions a coder left empty. Missing-value codes are kept in the data but marked as missing in SPSS, and set to NA in the R and Python files, so they drop out of percentages and models.</p>
+    <div class="grid2"><label for="cbNa">Code for skipped questions<input id="cbNa" inputmode="numeric" placeholder="Leave empty for blank, e.g. 97"></label><label for="cbMissing">Missing-value codes<input id="cbMissing" placeholder="e.g. 97, 98"></label></div>
+  </section>
+  <section class="lockable">
+    <h2>Reasons for excluding an article</h2>
+    <p>Chota asks for one of these whenever an article is excluded, by the Exclude button or by a skip rule. One per line. The reason is exported with the article, ready for a sample flow table.</p>
+    <textarea id="cbReasons" rows="6"></textarea>
+  </section>
   <section>
+    <h2>Share the codebook</h2>
+    <p>Download the codebook as a file that other coders import here. Locking it stops anyone editing questions or codes by accident, so everyone codes with the same version. Each coded article also records the version it was coded with.</p>
+    <div class="btnrow"><button id="btnCbDownload">Download codebook</button><button id="btnCbDownloadLock">Download locked copy for coders</button><button id="btnCbLock">Lock this codebook</button></div>
+  </section>
+  <section class="lockable">
     <h2>Paste a codebook</h2>
-    <p>One question per line as <code>name | question | type | coding rule</code>. Types are <code>binary</code> (Yes 1, No 0), <code>single: 1=Market; 2=Governance</code>, <code>number</code> or <code>text</code>. Pasting replaces the list above.</p>
+    <p>One question per line as <code>name | question | type | coding rule | skip: rules</code>. Types are <code>binary</code> (Yes 1, No 0), <code>single: 0=No; 1=Yes; 98=Cannot determine</code>, <code>number</code> or <code>text</code>. Skip rules are optional, for example <code>skip: 0=exclude</code> (end coding and exclude the article), <code>0=end</code> or <code>0=dominant</code> (skip to that question). You can also paste a codebook written as numbered variables. Pasting replaces the list above.</p>
     <textarea id="bulkCb" rows="7" placeholder="market | Is AI presented as a market? | binary | Products, investment, jobs, revenue
 dominant | Which orientation gets the most space? | single: 1=Market; 2=Governance; 3=Capability; 4=None
 notes | Notes | text"></textarea>
@@ -337,14 +376,22 @@ notes | Notes | text"></textarea>
 
 <section id="v-recode" class="view"><div class="page"><div>
   <h1>Reliability</h1>
-  <p class="lede">With one coder, reliability comes from coding a random subsample twice. Wait about a week, recode the sample without seeing your first codes, and report Krippendorff's alpha for each variable. An alpha of .80 or higher is the usual benchmark, and .667 is the floor for tentative conclusions.</p>
+  <p class="lede">Report Krippendorff's alpha for each variable. An alpha of .80 or higher is the usual benchmark, and .667 is the floor for tentative conclusions. Alpha uses each question's measure (nominal, ordinal or scale). The 95% interval comes from 1,000 resamples of the articles. Skipped questions and missing-value codes are left out.</p>
   <section>
-    <h2>Sample</h2>
-    <div class="btnrow"><label class="small muted">Sample <input type="number" id="sampPct" value="10" min="1" max="100" style="width:64px"> % of coded articles</label><button id="drawSample">Draw a random sample</button><button class="primary" id="startRecode" disabled>Start recoding</button><button id="stopRecode" style="display:none">Back to normal coding</button></div>
-    <p id="sampInfo" class="small" style="margin-top:12px"></p>
+    <h2>Compare coders</h2>
+    <p>Load the other coders' codes files: each coder's <code>chota-codes-name.json</code> from a shared folder, or a backup they downloaded from Export. Articles coded by two or more coders are compared, including yours.</p>
+    <div class="btnrow"><button class="primary" id="btnCoders">Add coders' files…</button><button id="btnCodersDir" style="display:none">Use the codes files in my folder</button><button id="btnCodersClear" style="display:none">Clear</button><input type="file" id="codersIn" accept=".json,application/json" multiple hidden></div>
+    <p id="codersInfo" class="small" style="margin-top:12px"></p>
+    <div id="icrTable" class="small" style="margin-top:10px"></div>
+    <div class="btnrow" style="margin-top:12px"><button id="dlIcr" disabled>Download results as CSV</button><button id="dlDis" disabled>Download disagreements as CSV</button></div>
+    <div id="disList" class="small" style="margin-top:14px"></div>
   </section>
   <section>
-    <div class="btnrow" style="justify-content:space-between"><h2 style="margin:0">Results</h2><button id="dlRel" disabled>Download results as CSV</button></div>
+    <h2>Recode a sample yourself</h2>
+    <p>With one coder, reliability comes from coding a random subsample twice. Wait about a week, then recode the sample without seeing your first codes.</p>
+    <div class="btnrow"><label class="small muted">Sample <input type="number" id="sampPct" value="10" min="1" max="100" style="width:64px"> % of coded articles</label><button id="drawSample">Draw a random sample</button><button class="primary" id="startRecode" disabled>Start recoding</button><button id="stopRecode" style="display:none">Back to normal coding</button></div>
+    <p id="sampInfo" class="small" style="margin-top:12px"></p>
+    <div class="btnrow" style="justify-content:space-between;margin-top:14px"><h2 style="margin:0;font-size:17px">Your recoding results</h2><button id="dlRel" disabled>Download results as CSV</button></div>
     <div id="relTable" class="small muted" style="margin-top:10px">Results appear once some sample articles are recoded.</div>
   </section>
 </div></div></section>
@@ -361,6 +408,7 @@ notes | Notes | text"></textarea>
       <button data-exp="r"><b>R and Python</b><span>CSV with scripts that load it with labels</span></button>
     </div>
     <label class="small muted" style="display:flex;gap:8px;align-items:center;margin-top:14px"><input type="checkbox" id="expEx"> Leave out excluded articles</label>
+    <label class="small muted" style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="expRef"> Start variable names with question numbers, e.g. <code>V3_ELIGIBLE</code></label>
   </section>
   <section>
     <h2>Backup</h2>
@@ -385,6 +433,12 @@ notes | Notes | text"></textarea>
     <p>One per line as <code>Outlet name = Country</code>. Chota looks for these names on each article's first page and in file names, and fills in the outlet and country for you. The order sets the numeric codes, so the first outlet is 1. Outlets you type in while coding are numbered after these.</p>
     <textarea id="setOutlets" rows="10" placeholder="The Guardian = United Kingdom
 New York Times = United States"></textarea>
+  </section>
+  <section>
+    <h2>Sampling log</h2>
+    <p>Import the spreadsheet of sampled articles (.xlsx or .csv, one row per article). Chota matches each article to its row by headline or PDF file name. It fills in the outlet, country, date, year and headline from columns with those names, and fills any question whose name matches a column (for example <code>ARTICLE_ID</code>). Every column of the log is added to your exports.</p>
+    <div class="btnrow"><button id="btnLog">Import a sampling log…</button><input type="file" id="logIn" accept=".xlsx,.xls,.csv" hidden></div>
+    <div id="logBox" style="margin-top:12px"></div>
   </section>
   <section>
     <h2>Highlight words</h2>
