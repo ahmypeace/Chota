@@ -547,9 +547,22 @@ function renderFolders() {
   if (folders.length && S.files.some((f) => !f.folder)) box.append(row('No folder', '__unfiled', 0, false));
   const sel = S.folderSel;
   $('#btnDelFolder').style.display = sel && sel !== '__unfiled' ? '' : 'none';
+  updateSelBar();
+}
+function updateSelBar() {
   $('#selBar').style.display = S.selecting ? 'flex' : 'none';
   $('#btnSelect').classList.toggle('on', S.selecting);
   $('#selCount').textContent = `${S.selected.size} selected`;
+  const shown = [...(S.shownFiles || [])];
+  const all = shown.length > 0 && shown.every((id) => S.selected.has(id));
+  $('#btnSelAll').textContent = all ? 'Select none' : `Select all${shown.length ? ' ' + shown.length : ''}`;
+  $('#btnSelAll').disabled = !shown.length;
+}
+function toggleSelectAll() {
+  const shown = [...(S.shownFiles || [])];
+  if (shown.length && shown.every((id) => S.selected.has(id))) for (const id of shown) S.selected.delete(id);
+  else for (const id of shown) S.selected.add(id);
+  renderQueue(); renderFolders();
 }
 function parentsOpen(p) { const parts = p.split('/'); for (let i = 1; i <= parts.length; i++) if (!S.openFolders.has(parts.slice(0, i).join('/'))) return false; return true; }
 function chooseFolder(title) {
@@ -772,6 +785,7 @@ function renderQueue(onlyCur) {
   }
   const filt = S.qFilter, q = $('#qSearch').value.trim().toLowerCase();
   const frag = document.createDocumentFragment(); let shown = 0;
+  S.shownFiles = new Set(); // PDFs matching the folder, filter and search, for Select all
   for (const it of queueItems()) {
     const done = isDone(it.key);
     if (filt === 'todo' && done && it.i !== S.cur) continue;
@@ -784,7 +798,8 @@ function renderQueue(onlyCur) {
     const title = meta.headline || (f ? f.name : it.key.replace(/~p\d+$/, ''));
     const sub = a ? [!S.folderSel && f.folder, f.name + (f.starts.length > 1 ? `, p. ${a.start}–${a.end}` : ''), f.file && !f.handle && (S.dir || !f.stored) && !f.storeFailed ? 'saving' : ''].filter(Boolean).join('  /  ') : 'PDF not in the library yet';
     if (q && !(title + ' ' + sub).toLowerCase().includes(q)) continue;
-    if (++shown > 1500) break;
+    if (f) S.shownFiles.add(f.id);
+    if (++shown > 1500) continue;
     const ex = S.mode === 'code' && rec?.excluded;
     const seld = f && S.selected.has(f.id);
     frag.append(el('div', { class: 'qi' + (it.i === S.cur && it.i >= 0 && !S.selecting ? ' cur' : '') + (seld ? ' sel' : ''), 'data-i': it.i, onclick: () => {
@@ -796,6 +811,8 @@ function renderQueue(onlyCur) {
   list.innerHTML = ''; list.append(frag);
   if (!shown) list.append(el('p', { class: 'small muted', style: 'padding:8px 10px' }, !S.files.length ? 'Your library is empty. Add PDFs above or drop them anywhere on the page.' : filt === 'todo' ? 'Everything here is coded.' : 'Nothing matches.'));
   const c = list.querySelector('.cur'); if (c) c.scrollIntoView({ block: 'nearest' });
+  if (shown > 1500) list.append(el('p', { class: 'small muted', style: 'padding:8px 10px' }, `Showing 1,500 of ${shown}. Search or open a folder to narrow the list.`));
+  updateSelBar();
 }
 
 /* ---------- form ---------- */
@@ -1821,6 +1838,7 @@ $('#btnNewFolder').onclick = newFolder; $('#btnAutoSort').onclick = autoSort; $(
 $('#btnSelect').onclick = () => { S.selecting = !S.selecting; S.selected.clear(); renderFolders(); renderQueue(); };
 $('#btnMoveSel').onclick = async () => { const files = S.files.filter((f) => S.selected.has(f.id)); if (!files.length) { toast('Tap PDFs in the list to select them'); return; } const to = await chooseFolder(`Move ${files.length} PDF${files.length > 1 ? 's' : ''} to`); if (to === null) return; moveFiles(files, to); S.selected.clear(); S.selecting = false; S.folderSel = to; if (to) { const ps = to.split('/'); for (let i = 1; i <= ps.length; i++) S.openFolders.add(ps.slice(0, i).join('/')); } renderFolders(); renderQueue(); toast('Moved'); };
 $('#btnRemoveSel').onclick = removeSelected;
+$('#btnSelAll').onclick = toggleSelectAll;
 $('#btnRestore').onclick = () => $('#restoreIn').click();
 $('#restoreIn').onchange = (e) => { if (e.target.files[0]) restore(e.target.files[0]); e.target.value = ''; };
 $('#drawSample').onclick = async () => { if (S.sample && !(await ask('Draw a new sample? Recodes already done stay saved but may fall outside the new sample.', 'Draw new'))) return; drawSample(); };

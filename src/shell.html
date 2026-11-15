@@ -98,7 +98,8 @@ svg.i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stro
 .frow .tw{width:12px;font-size:10px;color:var(--ink-3)}
 .frow .fn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .frow .fc{font-size:12px;color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums}
-.selbar{display:flex;gap:6px;align-items:center;padding:6px 14px;background:var(--pencil-wash);font-size:13px}
+.selbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 14px;background:var(--pencil-wash);font-size:13px}
+.selbar button{padding:5px 9px;font-size:13px}
 .selbar span{flex:1}
 .qtop{display:flex;align-items:center;gap:6px;padding:10px 14px 6px;border-top:1px solid var(--rule)}
 .qtop .seg{flex:1}
@@ -297,7 +298,7 @@ td.bad{color:var(--pencil-text);font-weight:700}
         <div class="seg" id="qFilter"><button data-f="todo" class="on">To code</button><button data-f="done">Coded</button><button data-f="all">All</button></div>
         <button class="quiet" id="btnSelect" title="Select PDFs to move or remove">Select</button>
       </div>
-      <div class="selbar" id="selBar" style="display:none"><span id="selCount"></span><button id="btnMoveSel">Move to…</button><button id="btnRemoveSel">Remove</button></div>
+      <div class="selbar" id="selBar" style="display:none"><span id="selCount"></span><button id="btnSelAll" title="Select every PDF in this list">Select all</button><button id="btnMoveSel">Move to…</button><button id="btnRemoveSel">Remove</button></div>
       <div style="padding:4px 14px 8px"><input id="qSearch" placeholder="Search headlines and file names"></div>
       <div id="scanState" class="small muted" style="padding:0 16px"></div>
       <div id="qlist"></div>
