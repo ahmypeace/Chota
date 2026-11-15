@@ -1,19 +1,19 @@
-# Chota
+# Chọta
 
-Chota is a browser app for manual content analysis. You read each article as a PDF and answer your codebook questions on the same screen, then export the coded data to SPSS, Excel, CSV, R or Python.
+Chọta, Igbo for "find", is a browser app for manual content analysis. You read each article as a PDF and answer your codebook questions on the same screen, then export the coded data to SPSS, Excel, CSV, R or Python.
 
 Anyone can use it for their own project. It starts with an empty codebook. You write your own questions, list your outlets and set your own target. It was first built for a study of about 940 newspaper articles on AI, and that study's questions are available as an example under **Load example questions** on the Codebook screen.
 
 ## Getting started
 
-1. Open Chota. In the **Codebook** screen, add your questions, or paste them all at once (see the format below).
+1. Open Chọta. In the **Codebook** screen, add your questions, or paste them all at once (see the format below).
 2. Optional: in **Settings**, list your outlets as `Outlet = Country`, and set a target, a deadline and words to highlight.
 3. Open the **Library**. In Chrome or Edge, click **Save to a folder…** and choose the folder that holds your PDFs. In other browsers, click **Add PDFs**.
 4. Code each article and press `Enter` to save and move to the next one. Export when you're done.
 
-## What Chota fills in from each PDF
+## What Chọta fills in from each PDF
 
-When you add PDFs, Chota reads the text of each article's first page and fills in:
+When you add PDFs, Chọta reads the text of each article's first page and fills in:
 
 | Detail | How it's found |
 |---|---|
@@ -52,16 +52,16 @@ Nothing is uploaded. Your PDFs and codes stay on your own computer, which also k
 
 ## Where your work is saved
 
-**In Chrome or Edge, save to a folder (recommended).** In the Library, click **Save to a folder…** and choose a folder, for example one in OneDrive. Chota then:
+**In Chrome or Edge, save to a folder (recommended).** In the Library, click **Save to a folder…** and choose a folder, for example one in OneDrive. Chọta then:
 
 - opens every PDF in that folder and its subfolders. Subfolders appear as library folders.
 - copies PDFs you add later into the folder.
 - saves your codes, codebook and settings to `chota-codes.json` in the folder after every article.
 - keeps a dated copy of that file in `chota-backups/` each day you open it.
 
-On later visits, Chota asks to reopen the folder. Click **Open folder** and allow access. If you choose "Allow on every visit", Chrome stops asking.
+On later visits, Chọta asks to reopen the folder. Click **Open folder** and allow access. If you choose "Allow on every visit", Chrome stops asking.
 
-**In Firefox or Safari, Chota saves in the browser.** Your PDFs and codes are kept in that browser between visits. Clearing browser data erases them, so download a backup from Export at the end of each session.
+**In Firefox or Safari, Chọta saves in the browser.** Your PDFs and codes are kept in that browser between visits. Clearing browser data erases them, so download a backup from Export at the end of each session.
 
 ### Coding as a team
 
@@ -71,7 +71,7 @@ Share one folder of PDFs (for example a shared OneDrive or Teams folder). Each c
 
 ## Sampling log
 
-In **Settings**, import the spreadsheet of sampled articles (.xlsx or .csv). Chota matches each article to its row by headline or PDF file name. It then fills in:
+In **Settings**, import the spreadsheet of sampled articles (.xlsx or .csv). Chọta matches each article to its row by headline or PDF file name. It then fills in:
 
 - the outlet, country, date, year and headline, from columns with those names
 - any question whose name matches a column. `V1_ARTICLE_ID` is filled from `ARTICLE_ID`
@@ -99,7 +99,7 @@ Codes | 0 No; 1 Yes                               1=other image
 Skip | If 0, stop and log the reason.
 ```
 
-Chota picks up:
+Chọta picks up:
 
 - each question's codes
 - write-in questions
@@ -121,7 +121,7 @@ Codes with two digits can be typed on the keyboard: press `9` then `8` for 98.
 
 ### Checks
 
-A categories question can be linked to earlier Yes/No questions, for example `1=MARKET; 2=GOVERNANCE; 3=CAPABILITY; 0=none`. Chota then warns before saving if V9 names a framing that wasn't coded Yes, or is 0 while one was. You can fix the codes, or press `Enter` again to save anyway. Articles saved anyway carry the warning in a `check_flags` column. On import, Chota sets this up from lines like "V9 must be one of the framings coded 1 in V6 to V8".
+A categories question can be linked to earlier Yes/No questions, for example `1=MARKET; 2=GOVERNANCE; 3=CAPABILITY; 0=none`. Chọta then warns before saving if V9 names a framing that wasn't coded Yes, or is 0 while one was. You can fix the codes, or press `Enter` again to save anyway. Articles saved anyway carry the warning in a `check_flags` column. On import, Chọta sets this up from lines like "V9 must be one of the framings coded 1 in V6 to V8".
 
 ### Measure
 
@@ -129,7 +129,7 @@ Each question has a Measure (Nominal, Ordinal or Scale). It is written into the 
 
 ### Exclusion reasons
 
-When an article is excluded, by the Exclude button or by a rule such as "V3 = 0, end coding and exclude", Chota asks for the reason. Edit the list of reasons on the Codebook screen. Reasons are exported in `exclude_reason`.
+When an article is excluded, by the Exclude button or by a rule such as "V3 = 0, end coding and exclude", Chọta asks for the reason. Edit the list of reasons on the Codebook screen. Reasons are exported in `exclude_reason`.
 
 ### Sharing and versions
 
