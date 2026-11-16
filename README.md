@@ -173,3 +173,9 @@ build.py        joins src/ into index.html
 After editing anything in `src/`, run `python build.py` (`python3 build.py` on Mac).
 
 Libraries are loaded from cdnjs: pdf.js 3.11.174, SheetJS 0.18.5 and JSZip 3.10.1.
+
+## License
+
+Chota is released under the [Functional Source License, Version 1.1, ALv2 Future License](LICENSE.md) (FSL-1.1-ALv2). You may use, study, change and share it for any purpose except offering a competing product or service. Each version becomes available under the Apache License 2.0 two years after its release.
+
+Copyright 2026 Amaka Peace Onebunne.
